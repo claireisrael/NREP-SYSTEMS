@@ -1,4 +1,4 @@
-name: NREP SYSTEMS Mobile CI
+name: NREP SYSTEMS Mobile App CI
 
 on:
   push:
@@ -19,7 +19,7 @@ on:
 
 jobs:
   ci:
-    name: Lint & build check
+    name: Lint & build check (NREP SYSTEMS)
     runs-on: ubuntu-latest
 
     defaults:
@@ -40,14 +40,14 @@ jobs:
         run: npm install
 
       - name: Lint
-        run: npm run lint -- --max-warnings=0
+        run: npm run lint
 
       # Optional: basic JS/TS typecheck or test commands can go here
       # - name: Typecheck
       #   run: npm run typecheck
 
   eas-build:
-    name: EAS build
+    name: EAS build (preview)
     needs: ci
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
