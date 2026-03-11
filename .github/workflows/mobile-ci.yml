@@ -1,0 +1,85 @@
+name: NREP SYSTEMS Mobile CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  # Manual trigger for builds
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to build"
+        required: true
+        default: "android"
+        type: choice
+        options:
+          - android
+          - ios
+
+jobs:
+  ci:
+    name: Lint & build check
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint
+        run: npm run lint -- --max-warnings=0
+
+      # Optional: basic JS/TS typecheck or test commands can go here
+      # - name: Typecheck
+      #   run: npm run typecheck
+
+  eas-build:
+    name: EAS build
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Configure EAS
+        run: npx eas-cli whoami || echo "Using EXPO_TOKEN from secrets"
+
+      - name: Run EAS build
+        run: |
+          PLATFORM="${{ github.event.inputs.platform }}"
+          if [ "$PLATFORM" = "android" ]; then
+            npx eas-cli build --platform android --profile preview --non-interactive
+          else
+            npx eas-cli build --platform ios --profile preview --non-interactive
+          fi
+
