@@ -1,45 +1,48 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "NREP SYSTEMS",
+    "slug": "nrep-systems",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/nrep-logo.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "HR.PROJECTS.NREP"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#14B8A6",
+        "foregroundImage": "./assets/images/nrep-logo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "HR.PROJECTS.NREP-SYSTEMS"
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/nrep-logo.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/nrep-logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
-          "dark": {
-            "backgroundColor": "#000000"
-          }
+          "backgroundColor": "#14B8A6"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
+    "extra": {
+      "APPWRITE_ENDPOINT": "https://appwrite.nrep.ug/v1",
+      "APPWRITE_PROJECT_ID": "66bcc8450005201fa1af",
+      "APPWRITE_DATABASE_ID": "68fb5845001d32f31656"
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
