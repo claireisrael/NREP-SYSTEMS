@@ -16,7 +16,7 @@
     "production": {
       "distribution": "store",
       "android": {
-        "buildType": "aab"
+        "buildType": "app-bundle"
       },
       "ios": {
         "simulator": false
@@ -25,7 +25,6 @@
   },
   "submit": {
     "production": {}
-  },
-  "projectId": "6697a014-2e8c-4319-affb-0345de49a173"
+  }
 }
 
