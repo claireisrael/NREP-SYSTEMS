@@ -41,11 +41,16 @@
     "extra": {
       "APPWRITE_ENDPOINT": "https://appwrite.nrep.ug/v1",
       "APPWRITE_PROJECT_ID": "66bcc8450005201fa1af",
-      "APPWRITE_DATABASE_ID": "68fb5845001d32f31656"
+      "APPWRITE_DATABASE_ID": "68fb5845001d32f31656",
+      "router": {},
+      "eas": {
+        "projectId": "6697a014-2e8c-4319-affb-0345de49a173"
+      }
     },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "owner": "israel_claire"
   }
 }
