@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "HR.PROJECTS.NREP"
+      "bundleIdentifier": "ug.nrep.systems"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +19,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "HR.PROJECTS.NREP-SYSTEMS"
+      "package": "ug.nrep.systems"
     },
     "web": {
       "output": "static",
