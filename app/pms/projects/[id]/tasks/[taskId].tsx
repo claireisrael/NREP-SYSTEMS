@@ -13,6 +13,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedView } from '@/components/themed-view';
+import { useThemeColor } from '@/hooks/use-theme-color';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { PMS_COLLECTIONS, PMS_DB_ID, pmsDatabases, Query } from '@/lib/appwrite';
 import { useAuth } from '@/context/AuthContext';
@@ -93,6 +94,8 @@ export default function TaskDetailScreen() {
   const [formStartDate, setFormStartDate] = useState('');
   const [formDueDate, setFormDueDate] = useState('');
   const [formAssignedTo, setFormAssignedTo] = useState<string[]>([]);
+
+  const textColor = useThemeColor({}, 'text');
 
   useEffect(() => {
     if (!id || !taskId) return;
@@ -207,6 +210,13 @@ export default function TaskDetailScreen() {
     return members.filter((m) => setIds.has(m.accountId));
   }, [task, members]);
 
+  const accountId =
+    user?.profile?.accountId || (user as any)?.authUser?.$id || (user as any)?.$id;
+  const isAssignee = !!(task && accountId && task.assignedTo?.includes(accountId));
+
+  const canEdit = !!user?.isAdmin;
+  const canChangeStatus = canEdit || isAssignee;
+
   const loweredStatus = (task?.status || '').toLowerCase();
   const statusPillStyles: any[] = [styles.statusPill];
   if (loweredStatus === 'todo') statusPillStyles.push(styles.statusTodo);
@@ -214,14 +224,8 @@ export default function TaskDetailScreen() {
   else if (loweredStatus === 'blocked') statusPillStyles.push(styles.statusBlocked);
   else if (loweredStatus === 'done') statusPillStyles.push(styles.statusDone);
 
-  if (!id || !taskId) {
-    return null;
-  }
-
-  const canEdit = !!user?.isAdmin;
-
   const handleQuickStatusUpdate = async (newStatus: TaskDoc['status']) => {
-    if (!task) return;
+    if (!task || !canChangeStatus) return;
 
     try {
       setUpdatingStatus(true);
@@ -307,14 +311,14 @@ export default function TaskDetailScreen() {
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
             <Pressable onPress={() => router.back()} style={styles.backButton}>
-              <MaterialCommunityIcons name="arrow-left" size={20} color="#111827" />
+              <MaterialCommunityIcons name="arrow-left" size={20} color={textColor} />
             </Pressable>
             <View style={styles.headerTextBlock}>
-              <Text style={styles.headerTitle} numberOfLines={1}>
+              <Text style={[styles.headerTitle, { color: textColor }]} numberOfLines={1}>
                 {task?.title || 'Task'}
               </Text>
               {project && (
-                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                <Text style={[styles.headerSubtitle, { color: textColor }]} numberOfLines={1}>
                   {project.code ? `${project.code} · ` : ''}
                   {project.name}
                   {milestone && (
@@ -330,7 +334,7 @@ export default function TaskDetailScreen() {
 
           {task && (
             <View style={styles.headerActions}>
-              {canEdit && (
+              {canChangeStatus && (
                 <View style={styles.headerButtonsRow}>
                   <Pressable
                     style={styles.statusUpdateButton}
@@ -349,29 +353,29 @@ export default function TaskDetailScreen() {
                     <MaterialCommunityIcons name="chevron-down" size={16} color="#ffffff" />
                   </Pressable>
 
-                  <Pressable
-                    style={styles.editButton}
-                    onPress={() => setEditing((prev) => !prev)}
-                    disabled={submitting || updatingStatus}
-                  >
-                    <MaterialCommunityIcons
-                      name="pencil-outline"
-                      size={14}
-                      color="#054653"
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text style={styles.editButtonText}>{editing ? 'Cancel' : 'Edit'}</Text>
-                  </Pressable>
+                  {canEdit && (
+                    <Pressable
+                      style={styles.editButton}
+                      onPress={() => setEditing((prev) => !prev)}
+                      disabled={submitting || updatingStatus}
+                    >
+                      <MaterialCommunityIcons
+                        name="pencil-outline"
+                        size={14}
+                        color="#054653"
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={styles.editButtonText}>{editing ? 'Cancel' : 'Edit'}</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
 
-              {task && (
-                <View style={statusPillStyles}>
-                  <Text style={styles.statusPillText}>
-                    {statusLabels[loweredStatus] || task.status}
-                  </Text>
-                </View>
-              )}
+              <View style={statusPillStyles}>
+                <Text style={styles.statusPillText}>
+                  {statusLabels[loweredStatus] || task.status}
+                </Text>
+              </View>
             </View>
           )}
         </View>

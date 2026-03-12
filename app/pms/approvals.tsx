@@ -17,6 +17,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
+import { useThemeColor } from '@/hooks/use-theme-color';
 
 const PMS_WEB_BASE_URL = 'https://projects.nrep.ug';
 
@@ -41,6 +42,8 @@ export default function PmsApprovalsScreen() {
   const [approvalComments, setApprovalComments] = useState('');
   const [rejectionComments, setRejectionComments] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const textColor = useThemeColor({}, 'text');
 
   const canSeeApprovals = user?.isAdmin || user?.isSupervisor || user?.isFinance;
 
@@ -235,8 +238,8 @@ export default function PmsApprovalsScreen() {
         >
           <View style={styles.header}>
             <View style={styles.headerTitleBlock}>
-              <Text style={styles.headerTitle}>Timesheet Approvals</Text>
-              <Text style={styles.headerSubtitleSmall}>
+              <Text style={[styles.headerTitle, { color: textColor }]}>Timesheet Approvals</Text>
+              <Text style={[styles.headerSubtitleSmall, { color: textColor }]}>
                 Review and approve team member timesheets.
               </Text>
             </View>

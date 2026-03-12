@@ -116,6 +116,10 @@ export default function PmsProjectDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
+  const isAdmin = !!user?.isAdmin;
+  const isSupervisor = !!user?.isSupervisor && !user?.isAdmin;
+  const canCreateTask = isAdmin || isSupervisor;
+
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -175,6 +179,12 @@ export default function PmsProjectDetailScreen() {
   const [datePickerValue, setDatePickerValue] = useState<Date | null>(null);
 
   useEffect(() => {
+    // If the user is no longer authenticated (e.g. after logout), leave this screen.
+    if (!user) {
+      router.replace('/pms');
+      return;
+    }
+
     if (!id) return;
 
     const load = async () => {
@@ -969,12 +979,14 @@ export default function PmsProjectDetailScreen() {
                       <View style={styles.priorityPill}>
                         <Text style={styles.priorityLabel}>All Priorities</Text>
                       </View>
-                      <Pressable
-                        style={styles.newTaskButton}
-                        onPress={() => setShowNewTaskModal(true)}
-                      >
-                        <Text style={styles.newTaskButtonText}>New Task</Text>
-                      </Pressable>
+                      {canCreateTask && (
+                        <Pressable
+                          style={styles.newTaskButton}
+                          onPress={() => setShowNewTaskModal(true)}
+                        >
+                          <Text style={styles.newTaskButtonText}>New Task</Text>
+                        </Pressable>
+                      )}
                     </View>
                   </View>
 
@@ -1553,13 +1565,14 @@ export default function PmsProjectDetailScreen() {
           )}
         </ScrollView>
 
-        {/* New Task modal */}
-        <Modal
-          transparent
-          visible={showNewTaskModal}
-          animationType="fade"
-          onRequestClose={() => !newTaskSubmitting && setShowNewTaskModal(false)}
-        >
+        {/* New Task modal (admins / supervisors only) */}
+        {canCreateTask && (
+          <Modal
+            transparent
+            visible={showNewTaskModal}
+            animationType="fade"
+            onRequestClose={() => !newTaskSubmitting && setShowNewTaskModal(false)}
+          >
           <View style={styles.newTaskModalOverlay}>
             <View style={styles.newTaskModalCard}>
               <Text style={styles.newTaskModalTitle}>New Task</Text>
@@ -1793,7 +1806,8 @@ export default function PmsProjectDetailScreen() {
               </View>
             </View>
           </View>
-        </Modal>
+          </Modal>
+        )}
 
         {/* Add Member modal */}
         <Modal

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,11 +8,21 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
+import { useThemeMode } from '@/context/ThemeModeContext';
 
 export default function PmsProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+  const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
+
+  // If there is no authenticated user, redirect out of this screen via effect
+  // to avoid navigation updates during render.
+  useEffect(() => {
+    if (!user) {
+      router.replace('/pms');
+    }
+  }, [user, router]);
 
   const profile = user?.profile;
   const authUser = user?.authUser;
@@ -211,6 +221,50 @@ export default function PmsProfileScreen() {
               </View>
             </View>
 
+          {/* Appearance / Theme card */}
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.cardTitle}>Appearance</Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <MaterialCommunityIcons
+                name="theme-light-dark"
+                size={18}
+                color="#0f766e"
+                style={styles.infoIcon}
+              />
+              <View style={styles.infoTextBlock}>
+                <Text style={styles.infoLabel}>Theme</Text>
+                <View style={styles.themeModeRow}>
+                  {(['system', 'light', 'dark'] as const).map((mode) => (
+                    <Pressable
+                      key={mode}
+                      style={[
+                        styles.themeModeChip,
+                        themeMode === mode && styles.themeModeChipActive,
+                      ]}
+                      onPress={() => setThemeMode(mode)}
+                    >
+                      <Text
+                        style={[
+                          styles.themeModeChipText,
+                          themeMode === mode && styles.themeModeChipTextActive,
+                        ]}
+                      >
+                        {mode === 'system'
+                          ? 'System'
+                          : mode === 'light'
+                          ? 'Light'
+                          : 'Dark'}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            </View>
+          </View>
+
             <View style={styles.sectionBlock}>
               <View style={styles.sectionHeaderRow}>
                 <MaterialCommunityIcons
@@ -300,7 +354,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 999,
-    backgroundColor: '#054653',
+    backgroundColor: '#14B8A6',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -347,6 +401,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#111827',
     textTransform: 'capitalize',
+  },
+  themeModeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  themeModeChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    backgroundColor: '#ffffff',
+  },
+  themeModeChipActive: {
+    borderColor: '#14B8A6',
+    backgroundColor: '#ecfdf3',
+  },
+  themeModeChipText: {
+    fontSize: 11,
+    color: '#4b5563',
+    fontWeight: '500',
+  },
+  themeModeChipTextActive: {
+    color: '#054653',
+    fontWeight: '600',
   },
   card: {
     borderRadius: 16,

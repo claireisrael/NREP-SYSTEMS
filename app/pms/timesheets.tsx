@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useThemeColor } from '@/hooks/use-theme-color';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
 
@@ -46,6 +47,8 @@ export default function PmsTimesheetsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+
+  const textColor = useThemeColor({}, 'text');
 
   const loadDashboard = async () => {
     try {
@@ -407,9 +410,9 @@ export default function PmsTimesheetsScreen() {
                   color="#0f766e"
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.headerTitle}>Timesheets</Text>
+                <Text style={[styles.headerTitle, { color: textColor }]}>Timesheets</Text>
               </View>
-              <Text style={styles.headerSubtitleSmall}>
+              <Text style={[styles.headerSubtitleSmall, { color: textColor }]}>
                 Dashboard overview of your weekly time.
               </Text>
             </View>
@@ -687,6 +690,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#4338ca',
     textTransform: 'uppercase',
+  },
+  placeholderText: {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'left',
+    marginTop: 4,
   },
   quickCard: {
     borderRadius: 16,

@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useThemeColor } from '@/hooks/use-theme-color';
 import { PMS_COLLECTIONS, PMS_DB_ID, pmsDatabases, Query } from '@/lib/appwrite';
 import { useAuth } from '@/context/AuthContext';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
@@ -62,6 +63,17 @@ export default function PmsHomeScreen() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const pageBackground = useThemeColor({}, 'background');
+  const primaryTextColor = useThemeColor({}, 'text');
+
+  // Redirect to PMS entry when user logs out, but do it in an effect
+  // to avoid navigation state updates during render.
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace('/pms');
+    }
+  }, [authLoading, user, router]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -198,19 +210,35 @@ export default function PmsHomeScreen() {
   const isAdmin = !!user?.isAdmin;
   const roleLabel = isAdmin ? 'Administrator' : isSupervisor ? 'Supervisor' : 'Staff Member';
 
-  const displayName =
+  const rawDisplayName =
     user?.profile?.firstName || user?.profile?.username || user?.profile?.email || 'User';
+  const displayName = rawDisplayName.replace(/!/g, '');
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: pageBackground }]}>
       <ThemedView style={styles.container}>
         <View style={styles.welcomeCard}>
-          <View style={styles.welcomeLeft}>
-            <Text style={styles.welcomeLabel}>
-              {getGreeting()},{' '}
-              <Text style={styles.welcomeNameInline}>{displayName}</Text>!
+          <Pressable
+            style={styles.avatarCircle}
+            onPress={() => router.push('/pms/profile')}
+          >
+            <Text style={styles.avatarInitials}>
+              {(displayName?.[0] || 'U').toUpperCase()}
             </Text>
-            <Text style={styles.welcomeRole}>{roleLabel}</Text>
+          </Pressable>
+          <View style={styles.welcomeRightBlock}>
+            <Text style={styles.welcomeGreeting}>
+              {getGreeting()},{' '}
+              <Text style={styles.welcomeNameInline}>{displayName}!</Text>
+            </Text>
+            <View style={styles.welcomeChipsRow}>
+              <View style={[styles.welcomeChip, styles.welcomeChipPrimary]}>
+                <Text style={styles.welcomeChipText}>{roleLabel}</Text>
+              </View>
+              <View style={styles.welcomeChip}>
+                <Text style={styles.welcomeChipTextMuted}>NREP PROJECTS</Text>
+              </View>
+            </View>
             <Text style={styles.welcomeDate}>
               {new Date().toLocaleDateString('en-US', {
                 weekday: 'long',
@@ -220,16 +248,6 @@ export default function PmsHomeScreen() {
               })}
             </Text>
           </View>
-          {!isAdmin && !isSupervisor && (
-            <View style={styles.welcomeRight}>
-              <Pressable
-                style={styles.logTimeButton}
-                onPress={() => router.push('/pms/timesheets/my')}
-              >
-                <Text style={styles.logTimeText}>Log Time</Text>
-              </Pressable>
-            </View>
-          )}
         </View>
 
         <ScrollView
@@ -237,55 +255,53 @@ export default function PmsHomeScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Dashboard metric cards */}
+          {/* Dashboard metrics */}
           {!loading && !error && stats && (
-            <>
-              {isAdmin || isSupervisor ? (
-                <View style={styles.statsRow}>
-                  <View style={[styles.statsCard, styles.statsCardPrimary]}>
-                    <Text style={styles.statsLabel}>Total Projects</Text>
-                    <Text style={styles.statsValue}>{stats.totalProjects}</Text>
-                  </View>
-
-                  <View style={styles.statsCard}>
-                    <Text style={styles.statsLabel}>Active Projects</Text>
-                    <Text style={styles.statsValue}>{stats.activeProjects}</Text>
-                  </View>
-
-                  {isAdmin && (
-                    <View style={styles.statsCard}>
-                      <Text style={styles.statsLabel}>Total Users</Text>
-                      <Text style={styles.statsValue}>{stats.totalUsers ?? '-'}</Text>
-                    </View>
-                  )}
-
-                  <View style={[styles.statsCard, styles.statsCardStatus]}>
-                    <Text style={styles.statsLabel}>System Status</Text>
-                    <Text style={styles.statsStatusValue}>Healthy</Text>
-                  </View>
+            isAdmin || isSupervisor ? (
+              <View style={styles.statsRow}>
+                <View style={[styles.statsCard, styles.statsCardPrimary]}>
+                  <Text style={styles.statsLabel}>Total Projects</Text>
+                  <Text style={styles.statsValue}>{stats.totalProjects}</Text>
                 </View>
-              ) : (
-                <View style={styles.statsRow}>
-                  <View style={styles.statsCard}>
-                    <Text style={styles.statsLabel}>Weekly Hours</Text>
-                    <Text style={styles.statsValue}>
-                      {(stats.weeklyHours ?? 0).toFixed(1)}h
-                    </Text>
-                    <Text style={styles.statsSubLabel}>Current Week</Text>
-                  </View>
-                  <View style={styles.statsCard}>
-                    <Text style={styles.statsLabel}>Open Tasks</Text>
-                    <Text style={styles.statsValue}>{stats.myOpenTasks ?? 0}</Text>
-                  </View>
-                  <View style={styles.statsCard}>
-                    <Text style={styles.statsLabel}>My Projects</Text>
-                    <Text style={styles.statsValue}>
-                      {stats.myProjects ?? stats.totalProjects}
-                    </Text>
-                  </View>
+
+                <View style={styles.statsCard}>
+                  <Text style={styles.statsLabel}>Active Projects</Text>
+                  <Text style={styles.statsValue}>{stats.activeProjects}</Text>
                 </View>
-              )}
-            </>
+
+                {isAdmin && (
+                  <View style={styles.statsCard}>
+                    <Text style={styles.statsLabel}>Total Users</Text>
+                    <Text style={styles.statsValue}>{stats.totalUsers ?? '-'}</Text>
+                  </View>
+                )}
+
+                <View style={[styles.statsCard, styles.statsCardStatus]}>
+                  <Text style={styles.statsLabel}>System Status</Text>
+                  <Text style={styles.statsStatusValue}>Healthy</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.statsChipsRow}>
+                <View style={[styles.statsChip, styles.statsChipPrimary]}>
+                  <Text style={styles.statsChipLabel}>Weekly Hours</Text>
+                  <Text style={styles.statsChipValue}>
+                    {(stats.weeklyHours ?? 0).toFixed(1)}h
+                  </Text>
+                  <Text style={styles.statsChipSub}>Current Week</Text>
+                </View>
+                <View style={styles.statsChip}>
+                  <Text style={styles.statsChipLabel}>Open Tasks</Text>
+                  <Text style={styles.statsChipValue}>{stats.myOpenTasks ?? 0}</Text>
+                </View>
+                <View style={styles.statsChip}>
+                  <Text style={styles.statsChipLabel}>My Projects</Text>
+                  <Text style={styles.statsChipValue}>
+                    {stats.myProjects ?? stats.totalProjects}
+                  </Text>
+                </View>
+              </View>
+            )
           )}
 
           {loading && (
@@ -306,7 +322,7 @@ export default function PmsHomeScreen() {
               <View>
                 {/* Team / Admin Projects list */}
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>
+                  <Text style={[styles.sectionTitle, { color: primaryTextColor }]}>
                     {isSupervisor || isAdmin ? 'Team Projects' : 'My Projects'}
                   </Text>
                 </View>
@@ -314,7 +330,7 @@ export default function PmsHomeScreen() {
                 <FlatList
                   data={projects}
                   keyExtractor={(item) => item.$id}
-                  scrollEnabled
+                  scrollEnabled={false}
                   ListEmptyComponent={
                     <Text style={styles.emptyText}>
                       No projects yet. Create projects from the web Project Management System.
@@ -365,7 +381,9 @@ export default function PmsHomeScreen() {
               <View>
                 {/* Staff: My Active Projects + Activity Schedule + Upcoming Tasks */}
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>My Active Projects</Text>
+                  <Text style={[styles.sectionTitle, { color: primaryTextColor }]}>
+                    My Active Projects
+                  </Text>
                   <Pressable onPress={() => router.push('/pms/projects')}>
                     <Text style={styles.viewAllLink}>View All →</Text>
                   </Pressable>
@@ -418,48 +436,73 @@ export default function PmsHomeScreen() {
 
                 {/* Activity Schedule placeholder, like web when empty */}
                 <View style={styles.activityCard}>
-                  <Text style={styles.sectionTitle}>Activity Schedule</Text>
+                  <Text style={[styles.sectionTitle, { color: primaryTextColor }]}>
+                    Activity Schedule
+                  </Text>
                   <Text style={styles.emptyText}>No upcoming milestones.</Text>
                 </View>
 
                 {/* Upcoming Tasks */}
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>Upcoming Tasks</Text>
+                  <Text style={[styles.sectionTitle, { color: primaryTextColor }]}>
+                    Upcoming Tasks
+                  </Text>
                 </View>
                 {upcomingTasks.length === 0 ? (
                   <Text style={styles.emptyText}>No upcoming tasks.</Text>
                 ) : (
-                  upcomingTasks.map((item) => (
-                    <View key={item.$id} style={styles.taskCard}>
-                      <View style={styles.taskHeaderRow}>
-                        <Text style={styles.taskTitle}>{item.title}</Text>
-                        {item.priority && (
-                          <Text
-                            style={[
-                              styles.taskPriority,
-                              item.priority === 'high' && styles.taskPriorityHigh,
-                              item.priority === 'medium' && styles.taskPriorityMedium,
-                            ]}
-                          >
-                            {item.priority}
-                          </Text>
-                        )}
+                  upcomingTasks.map((item) => {
+                    const priority = (item.priority || '').toLowerCase();
+                    const priorityLabel =
+                      priority.charAt(0).toUpperCase() + priority.slice(1) || 'Medium';
+
+                    return (
+                      <View key={item.$id} style={styles.taskCard}>
+                        <View style={styles.taskAccent} />
+
+                        <View style={styles.taskContent}>
+                          <View style={styles.taskHeaderRow}>
+                            <Text style={styles.taskTitle} numberOfLines={2}>
+                              {item.title}
+                            </Text>
+                            {priority && (
+                              <View
+                                style={[
+                                  styles.taskPriorityPill,
+                                  priority === 'high' && styles.taskPriorityHigh,
+                                  priority === 'critical' && styles.taskPriorityCritical,
+                                  priority === 'medium' && styles.taskPriorityMedium,
+                                  priority === 'low' && styles.taskPriorityLow,
+                                ]}
+                              >
+                                <Text style={styles.taskPriorityPillText}>{priorityLabel}</Text>
+                              </View>
+                            )}
+                          </View>
+
+                          {(item.projectName || item.dueDate) && (
+                            <View style={styles.taskMetaRow}>
+                              {item.projectName && (
+                                <Text style={styles.taskMeta} numberOfLines={1}>
+                                  {item.projectName}
+                                </Text>
+                              )}
+                              {item.dueDate && (
+                                <Text style={styles.taskMetaDue}>
+                                  Due{' '}
+                                  {new Date(item.dueDate).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })}
+                                </Text>
+                              )}
+                            </View>
+                          )}
+                        </View>
                       </View>
-                      {item.projectName && (
-                        <Text style={styles.taskMeta}>Project: {item.projectName}</Text>
-                      )}
-                      {item.dueDate && (
-                        <Text style={styles.taskMeta}>
-                          Due{' '}
-                          {new Date(item.dueDate).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })}
-                        </Text>
-                      )}
-                    </View>
-                  ))
+                    );
+                  })
                 )}
               </View>
             )
@@ -475,21 +518,21 @@ export default function PmsHomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'transparent',
   },
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 16,
     paddingBottom: 8,
     gap: 16,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'transparent',
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   roleChip: {
     flexDirection: 'row',
@@ -511,22 +554,48 @@ const styles = StyleSheet.create({
   welcomeCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     backgroundColor: '#14B8A6',
     borderRadius: 18,
     paddingHorizontal: 16,
-    paddingVertical: 18,
+    paddingVertical: 14,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   welcomeLeft: {
     flex: 1,
   },
-  welcomeLabel: {
-    color: '#e0f2fe',
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#14B8A6',
+  },
+  avatarInitials: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#14B8A6',
+  },
+  welcomeRightBlock: {
+    flex: 1,
+  },
+  welcomeGreeting: {
+    color: '#ffffff',
     fontSize: 16,
+    fontWeight: '600',
   },
   welcomeNameInline: {
     color: '#ffffff',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
   },
   welcomeRole: {
@@ -536,13 +605,42 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   welcomeDate: {
-    marginTop: 8,
+    marginTop: 6,
     color: '#e0f2fe',
     fontSize: 12,
-    opacity: 0.85,
   },
   welcomeRight: {
     marginLeft: 12,
+  },
+  welcomeChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  welcomeChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(15,118,110,0.2)',
+  },
+  welcomeChipPrimary: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#14B8A6',
+  },
+  welcomeChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#14B8A6',
+    textTransform: 'uppercase',
+  },
+  welcomeChipTextMuted: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#e0f2fe',
+    textTransform: 'uppercase',
   },
   dateBadge: {
     borderRadius: 12,
@@ -589,6 +687,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#054653',
   },
+  statsCardFull: {
+    flexBasis: '100%',
+  },
   statsLabel: {
     fontSize: 11,
     color: '#6b7280',
@@ -614,6 +715,47 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#15803d',
   },
+  statsChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingTop: 10,
+    paddingBottom: 4,
+    gap: 8,
+  },
+  statsChip: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  statsChipPrimary: {
+    borderColor: '#0f766e',
+  },
+  statsChipLabel: {
+    fontSize: 11,
+    color: '#6b7280',
+    textTransform: 'uppercase',
+  },
+  statsChipValue: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#054653',
+  },
+  statsChipSub: {
+    marginTop: 2,
+    fontSize: 10,
+    color: '#9ca3af',
+  },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -629,8 +771,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sectionHeaderRow: {
-    marginTop: 12,
-    marginBottom: 6,
+    marginTop: 18,
+    marginBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -801,16 +943,27 @@ const styles = StyleSheet.create({
   },
   taskCard: {
     width: '100%',
+    flexDirection: 'row',
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 8,
+    marginBottom: 10,
     backgroundColor: '#ffffff',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  taskAccent: {
+    width: 3,
+    borderTopLeftRadius: 999,
+    borderBottomLeftRadius: 999,
+    marginVertical: 8,
+    backgroundColor: 'rgba(20, 184, 166, 0.65)',
+  },
+  taskContent: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   taskHeaderRow: {
     flexDirection: 'row',
@@ -822,22 +975,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#0f172a',
+    flex: 1,
+    paddingRight: 8,
   },
-  taskPriority: {
+  taskPriorityPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#f97316',
+  },
+  taskPriorityPillText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#f97316',
-    textTransform: 'lowercase',
+    color: '#ffffff',
+    textTransform: 'capitalize',
   },
   taskPriorityHigh: {
-    color: '#b91c1c',
+    backgroundColor: '#f59e0b', // match web "warning" for high
+  },
+  taskPriorityCritical: {
+    backgroundColor: '#dc2626', // match web "danger" for critical
   },
   taskPriorityMedium: {
-    color: '#ea580c',
+    backgroundColor: '#0ea5e9', // match web "info" for medium
+  },
+  taskPriorityLow: {
+    backgroundColor: '#6b7280', // neutral/secondary for low
+  },
+  taskMetaRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
   },
   taskMeta: {
     fontSize: 12,
     color: '#4b5563',
+    flex: 1,
+  },
+  taskMetaDue: {
+    fontSize: 12,
+    color: '#0f766e',
+    fontWeight: '500',
   },
   activityCard: {
     marginTop: 12,
