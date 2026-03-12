@@ -5,7 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAuth } from '@/context/AuthContext';
 
-type TabKey = 'home' | 'projects' | 'timesheets' | 'approvals' | 'profile';
+type TabKey = 'home' | 'projects' | 'timesheets' | 'approvals';
 
 export function PmsBottomNav() {
   const router = useRouter();
@@ -21,7 +21,6 @@ export function PmsBottomNav() {
     : pathname.startsWith('/pms/projects') ? 'projects'
     : pathname.startsWith('/pms/timesheets') ? 'timesheets'
     : pathname.startsWith('/pms/approvals') ? 'approvals'
-    : pathname.startsWith('/pms/profile') ? 'profile'
     : 'home';
 
   const goTo = (tab: TabKey, route: string) => {
@@ -30,39 +29,35 @@ export function PmsBottomNav() {
   };
 
   return (
-    <View style={styles.container}>
-      <NavItem
-        label="Home"
-        icon="home-variant-outline"
-        active={currentTab === 'home'}
-        onPress={() => goTo('home', '/pms/home')}
-      />
-      <NavItem
-        label="Projects"
-        icon="briefcase-outline"
-        active={currentTab === 'projects'}
-        onPress={() => goTo('projects', '/pms/projects')}
-      />
-      <NavItem
-        label="Timesheets"
-        icon="clock-outline"
-        active={currentTab === 'timesheets'}
-        onPress={() => goTo('timesheets', '/pms/timesheets')}
-      />
-      {showApprovals && (
+    <View style={styles.wrapper}>
+      <View style={styles.container}>
         <NavItem
-          label="Approvals"
-          icon="check-decagram-outline"
-          active={currentTab === 'approvals'}
-          onPress={() => goTo('approvals', '/pms/approvals')}
+          label="Home"
+          icon="home-variant-outline"
+          active={currentTab === 'home'}
+          onPress={() => goTo('home', '/pms/home')}
         />
-      )}
-      <NavItem
-        label="Profile"
-        icon="account-circle-outline"
-        active={currentTab === 'profile'}
-        onPress={() => goTo('profile', '/pms/profile')}
-      />
+        <NavItem
+          label="Projects"
+          icon="briefcase-outline"
+          active={currentTab === 'projects'}
+          onPress={() => goTo('projects', '/pms/projects')}
+        />
+        <NavItem
+          label="Timesheets"
+          icon="clock-outline"
+          active={currentTab === 'timesheets'}
+          onPress={() => goTo('timesheets', '/pms/timesheets')}
+        />
+        {showApprovals && (
+          <NavItem
+            label="Approvals"
+            icon="check-decagram-outline"
+            active={currentTab === 'approvals'}
+            onPress={() => goTo('approvals', '/pms/approvals')}
+          />
+        )}
+      </View>
     </View>
   );
 }
@@ -87,7 +82,7 @@ function NavItem({ label, icon, active, onPress }: NavItemProps) {
       <MaterialCommunityIcons
         name={icon}
         size={22}
-        color={active ? '#ffffff' : '#0f766e'}
+        color={active ? '#14B8A6' : '#6b7280'}
       />
       <Text style={[styles.itemLabel, active && styles.itemLabelActive]}>{label}</Text>
     </Pressable>
@@ -95,16 +90,25 @@ function NavItem({ label, icon, active, onPress }: NavItemProps) {
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: 4,
+    backgroundColor: 'transparent',
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 18,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
+    justifyContent: 'space-around',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
   },
   item: {
     flex: 1,
@@ -114,18 +118,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   itemActive: {
-    backgroundColor: '#14B8A6',
+    backgroundColor: 'transparent',
+    borderBottomWidth: 2,
+    borderBottomColor: '#14B8A6',
   },
   itemPressed: {
     opacity: 0.7,
   },
   itemLabel: {
     marginTop: 4,
-    fontSize: 11,
-    color: '#0f766e',
+    fontSize: 10,
+    color: '#6b7280',
   },
   itemLabelActive: {
-    color: '#ffffff',
+    color: '#14B8A6',
     fontWeight: '600',
   },
 });

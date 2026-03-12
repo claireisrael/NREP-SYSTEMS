@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#14B8A6",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/nrep-logo.png"
       },
       "edgeToEdgeEnabled": true,
