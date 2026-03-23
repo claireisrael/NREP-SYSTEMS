@@ -185,6 +185,46 @@ export default function HrRequestsScreen() {
     }
   }, [isLoading, user?.$id, loadAll]);
 
+  // NOTE: These useMemo hooks must NOT be placed after an early return,
+  // otherwise eslint will flag "React Hook is called conditionally".
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items.filter((r) => {
+      const status = String(r.status || '').toUpperCase();
+      const stage = String(r.approvalStage || '').toUpperCase();
+
+      const matchesStatus =
+        statusFilter === 'all' ? true
+        : statusFilter === 'draft' ? status === 'DRAFT'
+        : statusFilter === 'rejected' ? status === 'REJECTED'
+        : statusFilter === 'approved' ? status === 'APPROVED'
+        : statusFilter === 'pending'
+          ? ['PENDING', 'DEPT_APPROVED', 'L1_APPROVED', 'L2_APPROVED'].includes(status) ||
+            ['DEPARTMENT_REVIEW', 'L1_APPROVAL', 'L2_APPROVAL', 'FINANCE_COMPLETION'].includes(stage)
+          : true;
+
+      if (!matchesStatus) return false;
+      if (!q) return true;
+
+      const hay = [r.requestId, r.subject, r.requestType, r.requestCategory, r.status, r.approvalStage]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [items, search, statusFilter]);
+
+  const metrics = useMemo(() => {
+    const upper = (v: any) => String(v || '').toUpperCase();
+    return {
+      total: items.length,
+      draft: items.filter((r) => upper(r.status) === 'DRAFT').length,
+      pending: items.filter((r) => ['PENDING', 'DEPT_APPROVED', 'L1_APPROVED', 'L2_APPROVED'].includes(upper(r.status))).length,
+      completed: items.filter((r) => upper(r.status) === 'APPROVED').length,
+      rejected: items.filter((r) => upper(r.status) === 'REJECTED').length,
+    };
+  }, [items]);
+
   if (isLoading || !user) return null;
 
   const openDeleteModal = (doc: any) => {
@@ -409,44 +449,6 @@ export default function HrRequestsScreen() {
       setRejecting(false);
     }
   };
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((r) => {
-      const status = String(r.status || '').toUpperCase();
-      const stage = String(r.approvalStage || '').toUpperCase();
-
-      const matchesStatus =
-        statusFilter === 'all' ? true
-        : statusFilter === 'draft' ? status === 'DRAFT'
-        : statusFilter === 'rejected' ? status === 'REJECTED'
-        : statusFilter === 'approved' ? status === 'APPROVED'
-        : statusFilter === 'pending'
-          ? ['PENDING', 'DEPT_APPROVED', 'L1_APPROVED', 'L2_APPROVED'].includes(status) ||
-            ['DEPARTMENT_REVIEW', 'L1_APPROVAL', 'L2_APPROVAL', 'FINANCE_COMPLETION'].includes(stage)
-          : true;
-
-      if (!matchesStatus) return false;
-      if (!q) return true;
-
-      const hay = [r.requestId, r.subject, r.requestType, r.requestCategory, r.status, r.approvalStage]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [items, search, statusFilter]);
-
-  const metrics = useMemo(() => {
-    const upper = (v: any) => String(v || '').toUpperCase();
-    return {
-      total: items.length,
-      draft: items.filter((r) => upper(r.status) === 'DRAFT').length,
-      pending: items.filter((r) => ['PENDING', 'DEPT_APPROVED', 'L1_APPROVED', 'L2_APPROVED'].includes(upper(r.status))).length,
-      completed: items.filter((r) => upper(r.status) === 'APPROVED').length,
-      rejected: items.filter((r) => upper(r.status) === 'REJECTED').length,
-    };
-  }, [items]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
