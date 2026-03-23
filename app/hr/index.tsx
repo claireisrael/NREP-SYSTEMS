@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -16,10 +16,11 @@ import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
-import { hrAccount } from '@/lib/appwrite';
+import { useHrAuth } from '@/context/HrAuthContext';
 
 export default function HrLoginScreen() {
   const router = useRouter();
+  const { user, isLoading, isLocked, getRemainingLockoutTime, login } = useHrAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,6 +33,12 @@ export default function HrLoginScreen() {
     router.replace('/');
   };
 
+  useEffect(() => {
+    if (!isLoading && user) {
+      router.replace('/hr/home');
+    }
+  }, [isLoading, user, router]);
+
   const handleSubmit = async () => {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
@@ -41,19 +48,42 @@ export default function HrLoginScreen() {
       return;
     }
 
+    if (isLocked) {
+      const remaining = getRemainingLockoutTime();
+      setError(
+        `Account is locked due to too many failed attempts. Try again in ${remaining} minutes.`,
+      );
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
     try {
-      await hrAccount.createEmailPasswordSession(trimmedEmail, trimmedPassword);
+      await login(trimmedEmail, trimmedPassword);
       router.replace('/hr/home');
     } catch (err: any) {
       console.error('HR login failed', err);
       setError(err?.message || 'Sign in failed. Please check your credentials and try again.');
+      setPassword('');
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={[styles.content, { justifyContent: 'center' }]}>
+          <ActivityIndicator color="#0f766e" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (user) {
+    return null;
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -68,11 +98,9 @@ export default function HrLoginScreen() {
         >
           <View style={styles.topBar}>
             <Pressable style={styles.backButton} onPress={handleBackHome}>
-              <MaterialCommunityIcons name="chevron-left" size={22} color="#054653" />
               <Text style={styles.backText}>Back to home</Text>
             </Pressable>
           </View>
-
           <View style={styles.logoWrapper}>
             <Image
               source={require('@/assets/images/nrep-logo.png')}
@@ -90,90 +118,91 @@ export default function HrLoginScreen() {
               <Text style={styles.subtitle}>Enter your credentials to access your account</Text>
             </View>
 
-          {error && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
-
-          <View style={styles.fieldBlock}>
-            <Text style={styles.label}>Email Address</Text>
-            <View style={styles.inputRow}>
-              <View style={styles.inputIconBox}>
-                <MaterialCommunityIcons name="email-outline" size={20} color="#6b7280" />
+            {error && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="you@example.com"
-                placeholderTextColor="#9ca3af"
-                style={styles.input}
-              />
-            </View>
-          </View>
-
-          <View style={styles.fieldBlock}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Password</Text>
-              <Pressable
-                onPress={() => {
-                  // Later we can wire this to the existing web password reset flow.
-                }}>
-                <Text style={styles.forgotPassword}>Forgot password?</Text>
-              </Pressable>
-            </View>
-            <View style={styles.inputRow}>
-              <View style={styles.inputIconBox}>
-                <MaterialCommunityIcons name="lock-outline" size={20} color="#6b7280" />
-              </View>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                placeholder="••••••••"
-                placeholderTextColor="#9ca3af"
-                style={styles.input}
-              />
-              <Pressable
-                style={styles.eyeButton}
-                onPress={() => setShowPassword((prev) => !prev)}
-              >
-                <MaterialCommunityIcons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                  size={20}
-                  color="#6b7280"
-                />
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={styles.rememberRow}>
-            <Pressable
-              style={styles.checkbox}
-              onPress={() => setRememberMe((prev) => !prev)}
-            >
-              {rememberMe && <View style={styles.checkboxInner} />}
-            </Pressable>
-            <Text style={styles.rememberText}>Remember me</Text>
-          </View>
-
-          <Pressable
-            disabled={submitting}
-            style={({ pressed }) => [
-              styles.signInButton,
-              pressed && !submitting && styles.signInButtonPressed,
-            ]}
-            onPress={handleSubmit}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.signInText}>Sign In</Text>
             )}
-          </Pressable>
+
+            <View style={styles.fieldBlock}>
+              <Text style={styles.label}>Email Address</Text>
+              <View style={styles.inputRow}>
+                <View style={styles.inputIconBox}>
+                  <MaterialCommunityIcons name="email-outline" size={20} color="#6b7280" />
+                </View>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#9ca3af"
+                  style={styles.input}
+                />
+              </View>
+            </View>
+
+            <View style={styles.fieldBlock}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Password</Text>
+                <Pressable
+                  onPress={() => {
+                    router.push('/hr/forgot-password');
+                  }}
+                >
+                  <Text style={styles.forgotPassword}>Forgot password?</Text>
+                </Pressable>
+              </View>
+              <View style={styles.inputRow}>
+                <View style={styles.inputIconBox}>
+                  <MaterialCommunityIcons name="lock-outline" size={20} color="#6b7280" />
+                </View>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor="#9ca3af"
+                  style={styles.input}
+                />
+                <Pressable
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword((prev) => !prev)}
+                >
+                  <MaterialCommunityIcons
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color="#6b7280"
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={styles.rememberRow}>
+              <Pressable
+                style={styles.checkbox}
+                onPress={() => setRememberMe((prev) => !prev)}
+              >
+                {rememberMe && <View style={styles.checkboxInner} />}
+              </Pressable>
+              <Text style={styles.rememberText}>Remember me</Text>
+            </View>
+
+            <Pressable
+              disabled={submitting}
+              style={({ pressed }) => [
+                styles.signInButton,
+                pressed && !submitting && styles.signInButtonPressed,
+              ]}
+              onPress={handleSubmit}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.signInText}>Sign In</Text>
+              )}
+            </Pressable>
 
             <View style={styles.footerRow}>
               <Text style={styles.footerText}>Don&apos;t have an account?</Text>
@@ -200,10 +229,10 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 48,
+    paddingTop: 32,
+    paddingBottom: 32,
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
   },
   topBar: {
     alignSelf: 'stretch',

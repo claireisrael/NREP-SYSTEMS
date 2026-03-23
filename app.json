@@ -4,7 +4,7 @@
     "slug": "nrep-systems",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/nrep-logo.png",
+    "icon": "./assets/images/nrep-icon-foreground.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/images/nrep-logo.png"
+        "foregroundImage": "./assets/images/nrep-icon-foreground.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -23,17 +23,17 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/nrep-logo.png"
+      "favicon": "./assets/images/nrep-icon-foreground.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/nrep-logo.png",
+          "image": "./assets/images/nrep-icon-foreground.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#14B8A6"
+          "backgroundColor": "#FFFFFF"
         }
       ],
       "@react-native-community/datetimepicker"

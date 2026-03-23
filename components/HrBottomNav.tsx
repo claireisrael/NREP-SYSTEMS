@@ -2,25 +2,25 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHrAuth } from '@/context/HrAuthContext';
 
-import { useAuth } from '@/context/AuthContext';
+type TabKey = 'home' | 'travel' | 'timesheets' | 'requests' | 'approvals';
 
-type TabKey = 'home' | 'projects' | 'timesheets' | 'approvals';
-
-export function PmsBottomNav() {
+export function HrBottomNav() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { user } = useHrAuth();
 
-  const isSupervisor = !!user?.isSupervisor && !user?.isAdmin;
-  const isAdmin = !!user?.isAdmin;
-  const showApprovals = isAdmin || isSupervisor;
+  const canApprove = user?.systemRole === 'Senior Manager' || user?.systemRole === 'Supervisor';
 
   const currentTab: TabKey =
-    pathname.startsWith('/pms/home') ? 'home'
-    : pathname.startsWith('/pms/projects') ? 'projects'
-    : pathname.startsWith('/pms/timesheets') ? 'timesheets'
-    : pathname.startsWith('/pms/approvals') ? 'approvals'
+    pathname.startsWith('/hr/home') ? 'home'
+    : pathname.startsWith('/hr/travel') ? 'travel'
+    : pathname.startsWith('/hr/timesheets') ? 'timesheets'
+    : pathname.startsWith('/hr/requests') ? 'requests'
+    : pathname.startsWith('/hr/approvals') ? 'approvals'
     : 'home';
 
   const goTo = (tab: TabKey, route: string) => {
@@ -29,32 +29,38 @@ export function PmsBottomNav() {
   };
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, { paddingBottom: Math.max(10, insets.bottom + 8) }]}>
       <View style={styles.container}>
         <NavItem
           label="Home"
           icon="home-variant-outline"
           active={currentTab === 'home'}
-          onPress={() => goTo('home', '/pms/home')}
+          onPress={() => goTo('home', '/hr/home')}
         />
         <NavItem
-          label="Projects"
-          icon="briefcase-outline"
-          active={currentTab === 'projects'}
-          onPress={() => goTo('projects', '/pms/projects')}
+          label="Travel"
+          icon="airplane"
+          active={currentTab === 'travel'}
+          onPress={() => goTo('travel', '/hr/travel')}
         />
         <NavItem
           label="Timesheets"
           icon="clock-outline"
           active={currentTab === 'timesheets'}
-          onPress={() => goTo('timesheets', '/pms/timesheets')}
+          onPress={() => goTo('timesheets', '/hr/timesheets')}
         />
-        {showApprovals && (
+        <NavItem
+          label="Requests"
+          icon="file-document-outline"
+          active={currentTab === 'requests'}
+          onPress={() => goTo('requests', '/hr/requests')}
+        />
+        {canApprove && (
           <NavItem
             label="Approvals"
             icon="check-decagram-outline"
             active={currentTab === 'approvals'}
-            onPress={() => goTo('approvals', '/pms/approvals')}
+            onPress={() => goTo('approvals', '/hr/approvals')}
           />
         )}
       </View>
@@ -82,7 +88,7 @@ function NavItem({ label, icon, active, onPress }: NavItemProps) {
       <MaterialCommunityIcons
         name={icon}
         size={22}
-        color={active ? '#14B8A6' : '#6b7280'}
+        color={active ? '#054653' : '#6b7280'}
       />
       <Text style={[styles.itemLabel, active && styles.itemLabelActive]}>{label}</Text>
     </Pressable>
@@ -91,8 +97,11 @@ function NavItem({ label, icon, active, onPress }: NavItemProps) {
 
 const styles = StyleSheet.create({
   wrapper: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 16,
-    paddingBottom: 12,
     paddingTop: 4,
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
@@ -122,7 +131,7 @@ const styles = StyleSheet.create({
   itemActive: {
     backgroundColor: 'transparent',
     borderBottomWidth: 2,
-    borderBottomColor: '#14B8A6',
+    borderBottomColor: '#054653',
   },
   itemPressed: {
     opacity: 0.7,
@@ -133,7 +142,7 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   itemLabelActive: {
-    color: '#14B8A6',
+    color: '#054653',
     fontWeight: '600',
   },
 });
