@@ -80,6 +80,6 @@ jobs:
           if [ "$PLATFORM" = "android" ]; then
             npx eas-cli build --platform android --profile preview --non-interactive
           else
-            npx eas-cli build --platform ios --profile preview --non-interactive
+            npx eas-cli build --platform ios --profile preview-device --non-interactive
           fi
 
