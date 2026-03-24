@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useHrAuth } from '@/context/HrAuthContext';
 
-type TabKey = 'home' | 'travel' | 'timesheets' | 'requests' | 'approvals';
+type TabKey = 'home' | 'travel' | 'requests' | 'approvals' | 'staff';
 
 export function HrBottomNav() {
   const router = useRouter();
@@ -18,9 +19,9 @@ export function HrBottomNav() {
   const currentTab: TabKey =
     pathname.startsWith('/hr/home') ? 'home'
     : pathname.startsWith('/hr/travel') ? 'travel'
-    : pathname.startsWith('/hr/timesheets') ? 'timesheets'
     : pathname.startsWith('/hr/requests') ? 'requests'
     : pathname.startsWith('/hr/approvals') ? 'approvals'
+    : pathname.startsWith('/hr/staff-directory') ? 'staff'
     : 'home';
 
   const goTo = (tab: TabKey, route: string) => {
@@ -30,40 +31,47 @@ export function HrBottomNav() {
 
   return (
     <View style={[styles.wrapper, { paddingBottom: Math.max(10, insets.bottom + 8) }]}>
-      <View style={styles.container}>
-        <NavItem
-          label="Home"
-          icon="home-variant-outline"
-          active={currentTab === 'home'}
-          onPress={() => goTo('home', '/hr/home')}
-        />
-        <NavItem
-          label="Travel"
-          icon="airplane"
-          active={currentTab === 'travel'}
-          onPress={() => goTo('travel', '/hr/travel')}
-        />
-        <NavItem
-          label="Timesheets"
-          icon="clock-outline"
-          active={currentTab === 'timesheets'}
-          onPress={() => goTo('timesheets', '/hr/timesheets')}
-        />
-        <NavItem
-          label="Requests"
-          icon="file-document-outline"
-          active={currentTab === 'requests'}
-          onPress={() => goTo('requests', '/hr/requests')}
-        />
-        {canApprove && (
+      <LinearGradient
+        colors={['#054653', '#0e706d', '#FFB803']}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={styles.gradientShell}
+      >
+        <View style={styles.container}>
           <NavItem
-            label="Approvals"
-            icon="check-decagram-outline"
-            active={currentTab === 'approvals'}
-            onPress={() => goTo('approvals', '/hr/approvals')}
+            label="Home"
+            icon="home-variant-outline"
+            active={currentTab === 'home'}
+            onPress={() => goTo('home', '/hr/home')}
           />
-        )}
-      </View>
+          <NavItem
+            label="Travel"
+            icon="airplane"
+            active={currentTab === 'travel'}
+            onPress={() => goTo('travel', '/hr/travel')}
+          />
+          {canApprove && (
+            <NavItem
+              label="Approvals"
+              icon="check-decagram-outline"
+              active={currentTab === 'approvals'}
+              onPress={() => goTo('approvals', '/hr/approvals')}
+            />
+          )}
+          <NavItem
+            label="Requests"
+            icon="file-document-outline"
+            active={currentTab === 'requests'}
+            onPress={() => goTo('requests', '/hr/requests')}
+          />
+          <NavItem
+            label="Staff"
+            icon="account-group-outline"
+            active={currentTab === 'staff'}
+            onPress={() => goTo('staff', '/hr/staff-directory')}
+          />
+        </View>
+      </LinearGradient>
     </View>
   );
 }
@@ -111,10 +119,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
+    margin: 1.5,
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 999,
     backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  gradientShell: {
+    borderRadius: 999,
+    padding: 1.5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.08,

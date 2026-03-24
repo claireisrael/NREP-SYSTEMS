@@ -20,6 +20,7 @@ type HrAuthContextValue = {
   isLocked: boolean;
   loginAttempts: number;
   getRemainingLockoutTime: () => number;
+  refreshProfile: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -168,6 +169,20 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     return Math.ceil(diffMs / (60 * 1000));
   };
 
+  const refreshProfile = async () => {
+    try {
+      const currentUser = await hrAccount.get();
+      const profile = await withTimeout(
+        loadUserProfile(currentUser.$id, currentUser.email || undefined),
+        PROFILE_LOAD_TIMEOUT_MS,
+      );
+      setUser(profile);
+      writeCachedProfile(profile);
+    } catch {
+      // keep current user state on refresh failure
+    }
+  };
+
   const login = async (email: string, password: string) => {
     if (lockedUntil && lockedUntil.getTime() > Date.now()) {
       throw new Error(
@@ -223,6 +238,7 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     isLocked,
     loginAttempts,
     getRemainingLockoutTime,
+    refreshProfile,
     login,
     logout,
   };

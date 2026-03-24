@@ -26,6 +26,7 @@ export default function HrTravelScreen() {
   const insets = useSafeAreaInsets();
 
   const canApprove = user?.systemRole === 'Senior Manager' || user?.systemRole === 'Supervisor';
+  const hasAdminAccess = user?.systemRole === 'Senior Manager';
   const [activeTab, setActiveTab] = useState<'my' | 'approvals'>('my');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>(
     'all',
@@ -53,26 +54,38 @@ export default function HrTravelScreen() {
       setLoading(true);
 
       const [mine, l1, l2] = await Promise.all([
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-          Query.equal('userId', user.$id),
-          Query.orderDesc('submissionDate'),
-          Query.limit(50),
-        ]),
+        withTimeout(
+          hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
+            Query.equal('userId', user.$id),
+            Query.orderDesc('submissionDate'),
+            Query.limit(50),
+          ]),
+          12000,
+          'Loading your travel requests timed out.',
+        ),
         canApprove
-          ? hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-              Query.equal('l1ApproverId', user.$id),
-              Query.equal('status', 'pending'),
-              Query.orderDesc('submissionDate'),
-              Query.limit(50),
-            ])
+          ? withTimeout(
+              hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
+                Query.equal('l1ApproverId', user.$id),
+                Query.equal('status', 'pending'),
+                Query.orderDesc('submissionDate'),
+                Query.limit(50),
+              ]),
+              12000,
+              'Loading L1 approvals timed out.',
+            )
           : Promise.resolve({ documents: [] } as any),
         canApprove
-          ? hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-              Query.equal('l2ApproverId', user.$id),
-              Query.equal('status', 'l1_approved'),
-              Query.orderDesc('submissionDate'),
-              Query.limit(50),
-            ])
+          ? withTimeout(
+              hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
+                Query.equal('l2ApproverId', user.$id),
+                Query.equal('status', 'l1_approved'),
+                Query.orderDesc('submissionDate'),
+                Query.limit(50),
+              ]),
+              12000,
+              'Loading L2 approvals timed out.',
+            )
           : Promise.resolve({ documents: [] } as any),
       ]);
 
@@ -177,32 +190,59 @@ export default function HrTravelScreen() {
         }
       >
         <View style={styles.headerCard}>
-          <View style={styles.headerRow}>
-            <View style={styles.headerIconCircle}>
-              <MaterialCommunityIcons name="airplane" size={20} color="#054653" />
+          <View style={styles.headerTopRow}>
+            <View style={styles.headerInfoRow}>
+              <View style={styles.headerIconCircle}>
+                <MaterialCommunityIcons name="airplane" size={20} color="#054653" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>Travel Requests</Text>
+                <Text style={styles.subtitle}>
+                  {activeTab === 'my' ? 'Your requests and advances' : 'Requests waiting for approval'}
+                </Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Travel Requests</Text>
-              <Text style={styles.subtitle}>
-                {activeTab === 'my' ? 'Your requests and advances' : 'Requests waiting for approval'}
-              </Text>
-            </View>
-            {activeTab === 'my' ? (
-              <Pressable
-                style={styles.newButton}
-                onPress={() => {
-                  router.push('/hr/travel/new');
-                }}
-              >
-                <MaterialCommunityIcons name="plus" size={18} color="#ffffff" />
-                <Text style={styles.newButtonText}>New</Text>
-              </Pressable>
-            ) : (
+            {activeTab !== 'my' ? (
               <View style={styles.headerCountPill}>
                 <Text style={styles.headerCountText}>{approvalTotal}</Text>
               </View>
-            )}
+            ) : null}
           </View>
+
+          {activeTab === 'my' ? (
+            <View style={styles.headerActionsRow}>
+              <View style={styles.headerActions}>
+                {hasAdminAccess ? (
+                  <Pressable
+                    style={styles.adminButton}
+                    onPress={() => {
+                      router.push('/hr/travel/admin' as any);
+                    }}
+                  >
+                    <MaterialCommunityIcons name="cog-outline" size={16} color="#374151" />
+                    <Text style={styles.adminButtonText}>Admin</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  style={styles.newButton}
+                  onPress={() => {
+                    router.push('/hr/travel/new');
+                  }}
+                >
+                  <MaterialCommunityIcons name="plus" size={18} color="#ffffff" />
+                  <Text style={styles.newButtonText}>New Request</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+        </View>
+        
+        <View style={styles.quickBar}>
+          <Text style={styles.quickBarText}>
+            {activeTab === 'my'
+              ? `My requests: ${filteredMyRequests.length} | Pending approvals: ${approvalTotal}`
+              : `Approvals queue: ${approvalTotal}`}
+          </Text>
         </View>
 
         {activeTab === 'my' && (
@@ -290,10 +330,14 @@ export default function HrTravelScreen() {
         {loading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator color="#054653" />
+            <Text style={styles.loadingText}>Loading travel requests...</Text>
           </View>
         ) : error ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{error}</Text>
+            <Pressable onPress={loadData} style={styles.retryBtn}>
+              <Text style={styles.retryText}>Retry</Text>
+            </Pressable>
           </View>
         ) : activeTab === 'my' ? (
           <View style={styles.listCard}>
@@ -541,10 +585,24 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 5,
   },
-  headerRow: {
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  headerInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    marginRight: 8,
+  },
+  headerActionsRow: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    paddingTop: 10,
   },
   headerIconCircle: {
     width: 34,
@@ -556,6 +614,13 @@ const styles = StyleSheet.create({
   },
   title: { color: '#054653', fontSize: 20, fontWeight: '900' },
   subtitle: { marginTop: 4, color: '#6b7280', fontSize: 12 },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
   headerCountPill: {
     minWidth: 34,
     height: 34,
@@ -569,19 +634,49 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '800',
   },
+  adminButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 12,
+  },
+  adminButtonText: {
+    color: '#374151',
+    fontWeight: '800',
+    fontSize: 11,
+  },
   newButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#054653',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
     borderRadius: 12,
   },
   newButtonText: {
     color: '#ffffff',
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 11,
+  },
+  quickBar: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  quickBarText: {
+    color: '#6b7280',
+    fontSize: 11,
+    fontWeight: '700',
   },
   statsRow: {
     flexDirection: 'row',
@@ -689,6 +784,12 @@ const styles = StyleSheet.create({
   loadingBox: {
     paddingVertical: 26,
     alignItems: 'center',
+    gap: 8,
+  },
+  loadingText: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '700',
   },
   errorBox: {
     borderRadius: 14,
@@ -701,6 +802,19 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
     fontSize: 12,
     fontWeight: '600',
+  },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    borderRadius: 10,
+    backgroundColor: '#054653',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  retryText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
   },
   listCard: {
     borderRadius: 16,
@@ -841,4 +955,12 @@ const styles = StyleSheet.create({
   confirmBtnTextOutline: { color: '#054653', fontSize: 12, fontWeight: '900' },
   confirmBtnTextDanger: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
 });
+
+function withTimeout<T>(p: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let t: any;
+  const timeout = new Promise<T>((_, reject) => {
+    t = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+}
 

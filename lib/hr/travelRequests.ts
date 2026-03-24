@@ -13,6 +13,15 @@ import {
 
 export type HrProject = { $id: string; name?: string | null; projectID?: string | null };
 export type HrApprover = { userId: string; name: string; department?: string | null };
+export type TravelApproverDoc = {
+  $id: string;
+  userId: string;
+  approverName?: string;
+  approverEmail?: string;
+  departmentId?: string | null;
+  level: 'L1' | 'L2';
+  isActive?: boolean;
+};
 
 export type LocalAttachment = {
   id: string;
@@ -491,4 +500,111 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker:
   });
   await Promise.all(runners);
   return results;
+}
+
+export async function listDepartments() {
+  const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.DEPARTMENTS, [
+    Query.orderAsc('name'),
+    Query.limit(200),
+  ]);
+  return ((res as any)?.documents ?? []) as any[];
+}
+
+export async function getAllTravelApprovers(): Promise<TravelApproverDoc[]> {
+  const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS, [
+    Query.orderDesc('$createdAt'),
+    Query.limit(300),
+  ]);
+  const docs = (((res as any)?.documents ?? []) as any[]).map((d) => ({ ...d })) as TravelApproverDoc[];
+  if (!docs.length) return [];
+
+  // Mirror web behavior: enrich approver rows from users collection, not from approver doc attributes.
+  const usersRes = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [Query.limit(1000)]);
+  const users = ((usersRes as any)?.documents ?? []) as any[];
+  const byUserId = new Map<string, any>();
+  users.forEach((u) => byUserId.set(String(u.userId || ''), u));
+
+  return docs.map((d: any) => {
+    const u = byUserId.get(String(d.userId || ''));
+    return {
+      ...d,
+      approverName: u?.name || d.approverName || d.userId || 'Approver',
+      approverEmail: u?.email || d.approverEmail || '',
+      departmentId: (u?.departmentId ?? d.departmentId ?? null) as string | null,
+    };
+  });
+}
+
+export async function getEligibleTravelApprovers() {
+  const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
+    Query.limit(500),
+  ]);
+  return (((res as any)?.documents ?? []) as any[])
+    .filter((u) => !!u?.userId && !!u?.name && !!u?.email)
+    .map((u) => ({
+      userId: String(u.userId),
+      name: String(u.name),
+      email: String(u.email),
+      departmentId: (u.departmentId as string) || null,
+      systemRole: (u.systemRole as string) || 'Staff',
+    }));
+}
+
+export async function createTravelApprover(input: {
+  userId: string;
+  level: 'L1' | 'L2';
+}) {
+  const payload: any = {
+    userId: input.userId,
+    level: input.level,
+    isActive: true,
+  };
+  return await hrDatabases.createDocument(
+    HR_DB_ID,
+    HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS,
+    ID.unique(),
+    payload,
+  );
+}
+
+export async function updateTravelApprover(
+  documentId: string,
+  input: {
+    level: 'L1' | 'L2';
+  },
+) {
+  return await hrDatabases.updateDocument(
+    HR_DB_ID,
+    HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS,
+    documentId,
+    {
+      level: input.level,
+    },
+  );
+}
+
+export async function deactivateTravelApprover(documentId: string) {
+  return await hrDatabases.updateDocument(
+    HR_DB_ID,
+    HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS,
+    documentId,
+    { isActive: false },
+  );
+}
+
+export async function activateTravelApprover(documentId: string) {
+  return await hrDatabases.updateDocument(
+    HR_DB_ID,
+    HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS,
+    documentId,
+    { isActive: true },
+  );
+}
+
+export async function deleteTravelApprover(documentId: string) {
+  return await hrDatabases.deleteDocument(
+    HR_DB_ID,
+    HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS,
+    documentId,
+  );
 }

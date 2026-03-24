@@ -17,6 +17,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
 import { useHrAuth } from '@/context/HrAuthContext';
+import { HrLogoSpinner } from '@/components/HrLogoSpinner';
 
 export default function HrLoginScreen() {
   const router = useRouter();
@@ -75,7 +76,7 @@ export default function HrLoginScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={[styles.content, { justifyContent: 'center' }]}>
-          <ActivityIndicator color="#0f766e" />
+          <HrLogoSpinner size={62} />
         </View>
       </SafeAreaView>
     );

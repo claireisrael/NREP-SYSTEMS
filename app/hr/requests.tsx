@@ -253,6 +253,7 @@ export default function HrRequestsScreen() {
   };
 
   const canApprove = approvalItems.length > 0;
+  const hasAdminAccess = String(user.systemRole || '').toLowerCase() === 'senior manager';
   const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
     (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
     '') as string;
@@ -461,17 +462,28 @@ export default function HrRequestsScreen() {
       >
         <View style={styles.headerCard}>
           <View style={styles.headerRow}>
-            <View style={styles.headerIconCircle}>
-              <MaterialCommunityIcons name="clipboard-text-outline" size={20} color="#054653" />
+            <View style={styles.headerIdentity}>
+              <View style={styles.headerIconCircle}>
+                <MaterialCommunityIcons name="clipboard-text-outline" size={20} color="#054653" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>Requests</Text>
+                <Text style={styles.subtitle}>Your general requests</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Requests</Text>
-              <Text style={styles.subtitle}>Your general requests</Text>
+
+            <View style={styles.headerActionsRow}>
+              <Pressable style={styles.newButton} onPress={() => router.push('/hr/requests/new' as any)}>
+                <MaterialCommunityIcons name="plus" size={16} color="#ffffff" />
+                <Text style={styles.newButtonText}>New Request</Text>
+              </Pressable>
+              {hasAdminAccess ? (
+                <Pressable style={styles.adminButton} onPress={() => router.push('/hr/requests/admin' as any)}>
+                  <MaterialCommunityIcons name="cog-outline" size={16} color="#374151" />
+                  <Text style={styles.adminButtonText}>Admin Panel</Text>
+                </Pressable>
+              ) : null}
             </View>
-            <Pressable style={styles.newButton} onPress={() => router.push('/hr/requests/new' as any)}>
-              <MaterialCommunityIcons name="plus" size={18} color="#ffffff" />
-              <Text style={styles.newButtonText}>New</Text>
-            </Pressable>
           </View>
         </View>
 
@@ -487,7 +499,7 @@ export default function HrRequestsScreen() {
             style={[styles.segment, activeTab === 'approvals' && styles.segmentActive]}
           >
             <Text style={[styles.segmentText, activeTab === 'approvals' && styles.segmentTextActive]}>
-              Approvals ({approvalItems.length})
+              Approvals
             </Text>
           </Pressable>
           {canSeeCompleted ? (
@@ -496,7 +508,7 @@ export default function HrRequestsScreen() {
               style={[styles.segment, activeTab === 'completed' && styles.segmentActive]}
             >
               <Text style={[styles.segmentText, activeTab === 'completed' && styles.segmentTextActive]}>
-                Completed ({completedItems.length})
+                Completed
               </Text>
             </Pressable>
           ) : null}
@@ -1162,7 +1174,12 @@ const styles = StyleSheet.create({
   },
   title: { color: '#054653', fontSize: 20, fontWeight: '900' },
   subtitle: { marginTop: 4, color: '#6b7280', fontSize: 12, fontWeight: '600' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerRow: { gap: 10 },
+  headerIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   headerIconCircle: {
     width: 34,
     height: 34,
@@ -1179,8 +1196,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
+    justifyContent: 'center',
   },
   newButtonText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 }, // kept for compatibility
+  headerActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  adminButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 12,
+    justifyContent: 'center',
+  },
+  adminButtonText: { color: '#374151', fontWeight: '800', fontSize: 12 },
   loadingBox: { paddingVertical: 26, alignItems: 'center' },
   errorBox: {
     borderRadius: 14,

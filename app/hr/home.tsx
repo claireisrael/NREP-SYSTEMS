@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -8,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -16,6 +15,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useHrAuth } from '@/context/HrAuthContext';
 import { HrBottomNav } from '@/components/HrBottomNav';
+import { HrLogoSpinner } from '@/components/HrLogoSpinner';
 import { HR_COLLECTIONS, HR_DB_ID, hrDatabases, Query } from '@/lib/appwrite';
 
 function getGreeting() {
@@ -43,20 +43,29 @@ function formatShortDate(iso?: string | null) {
   }
 }
 
+function getFirstName(name?: string | null, email?: string | null) {
+  const raw = String(name || '').trim();
+  if (raw) return raw.split(/\s+/)[0];
+  const mail = String(email || '').trim();
+  if (mail.includes('@')) return mail.split('@')[0];
+  return 'User';
+}
+
 export default function HrHomeScreen() {
-  const { user, isLoading } = useHrAuth();
+  const { user, isLoading, refreshProfile } = useHrAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const greeting = getGreeting();
+  const firstName = getFirstName(user?.name, user?.email);
+  const badgeText = user?.staffCategory || 'Associate';
 
-  const [counts, setCounts] = useState({ travel: 0, requests: 0, timesheets: 0 });
+  const [counts, setCounts] = useState({ travel: 0, requests: 0, staff: 0 });
   const [countsLoading, setCountsLoading] = useState(false);
   const [countsError, setCountsError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [recent, setRecent] = useState({
     travel: [] as any[],
     requests: [] as any[],
-    timesheets: [] as any[],
   });
 
   useEffect(() => {
@@ -65,12 +74,18 @@ export default function HrHomeScreen() {
     }
   }, [isLoading, user, router]);
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshProfile();
+    }, [refreshProfile])
+  );
+
   const loadDashboardBits = useCallback(async () => {
       if (!user?.$id) return;
       try {
         setCountsLoading(true);
         setCountsError(null);
-        const [travelRes, reqRes, tsRes] = await Promise.all([
+        const [travelRes, reqRes, staffRes] = await Promise.all([
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
             Query.equal('userId', user.$id),
             Query.limit(1),
@@ -79,8 +94,7 @@ export default function HrHomeScreen() {
             Query.equal('userId', user.$id),
             Query.limit(1),
           ]),
-          hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TIMESHEETS, [
-            Query.equal('employeeId', user.$id),
+          hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
             Query.limit(1),
           ]),
         ]);
@@ -88,10 +102,10 @@ export default function HrHomeScreen() {
         setCounts({
           travel: (travelRes as any).total ?? (travelRes as any).documents?.length ?? 0,
           requests: (reqRes as any).total ?? (reqRes as any).documents?.length ?? 0,
-          timesheets: (tsRes as any).total ?? (tsRes as any).documents?.length ?? 0,
+          staff: (staffRes as any).total ?? (staffRes as any).documents?.length ?? 0,
         });
 
-        const [travelRecent, requestsRecent, timesheetsRecent] = await Promise.all([
+        const [travelRecent, requestsRecent] = await Promise.all([
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
             Query.equal('userId', user.$id),
             Query.orderDesc('submissionDate'),
@@ -102,17 +116,11 @@ export default function HrHomeScreen() {
             Query.orderDesc('submissionDate'),
             Query.limit(3),
           ]),
-          hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TIMESHEETS, [
-            Query.equal('employeeId', user.$id),
-            Query.orderDesc('$createdAt'),
-            Query.limit(3),
-          ]),
         ]);
 
         setRecent({
           travel: (travelRecent as any).documents ?? [],
           requests: (requestsRecent as any).documents ?? [],
-          timesheets: (timesheetsRecent as any).documents ?? [],
         });
       } catch (e) {
         console.error('Failed to load HR dashboard counts', e);
@@ -135,7 +143,7 @@ export default function HrHomeScreen() {
   if (isLoading) {
     return (
       <ThemedView style={styles.loadingContainer}>
-        <ActivityIndicator color="#0f766e" />
+        <HrLogoSpinner size={62} />
       </ThemedView>
     );
   }
@@ -175,18 +183,28 @@ export default function HrHomeScreen() {
 
               <View style={styles.roleChip}>
                 <ThemedText type="default" style={styles.roleChipText}>
-                  {(user.staffCategory || 'Associate').toUpperCase()}
+                  {badgeText}
                 </ThemedText>
               </View>
             </View>
 
             <View style={styles.welcomeTextBlock}>
               <ThemedText type="subtitle" style={styles.welcomeGreeting}>
-                {greeting}, {user.name || (user.email || '').split('@')[0]}!
+                {greeting}, {firstName}!
               </ThemedText>
-              <ThemedText type="default" style={styles.welcomeMeta}>
-                {formatToday()} • {user.systemRole || 'Staff'} • {user.departmentName || 'Department'}
-              </ThemedText>
+              <View style={styles.welcomeMetaRow}>
+                <ThemedText type="default" style={styles.welcomeMeta}>
+                  {formatToday()}
+                </ThemedText>
+                <View style={styles.metaRoleChip}>
+                  <ThemedText type="default" style={styles.metaRoleChipText}>
+                    {user.systemRole || 'Staff'}
+                  </ThemedText>
+                </View>
+                <ThemedText type="default" style={styles.welcomeMeta}>
+                  {user.departmentName || 'Department'}
+                </ThemedText>
+              </View>
             </View>
           </View>
         </View>
@@ -236,19 +254,19 @@ export default function HrHomeScreen() {
 
           <Pressable
             style={({ pressed }) => [styles.statCard, pressed && { opacity: 0.85 }]}
-            onPress={() => router.push('/hr/timesheets')}
+            onPress={() => router.push('/hr/staff-directory')}
           >
             <View style={styles.statTopRow}>
               <View style={[styles.statIconWrap, { backgroundColor: '#eff6ff' }]}>
-                <MaterialCommunityIcons name="calendar-clock-outline" size={18} color="#1d4ed8" />
+                <MaterialCommunityIcons name="account-group-outline" size={18} color="#1d4ed8" />
               </View>
               <View style={[styles.statAccent, { backgroundColor: '#1d4ed8' }]} />
             </View>
             <ThemedText type="title" style={styles.statValue}>
-              {countsLoading ? '…' : counts.timesheets}
+              {countsLoading ? '…' : counts.staff}
             </ThemedText>
             <ThemedText type="default" style={styles.statLabel}>
-              Timesheets
+              Staff
             </ThemedText>
           </Pressable>
         </View>
@@ -315,30 +333,6 @@ export default function HrHomeScreen() {
           )}
         </View>
 
-        <View style={styles.recentCard}>
-          <ThemedText type="default" style={styles.recentTitle}>
-            Timesheets
-          </ThemedText>
-          {recent.timesheets.length === 0 ? (
-            <ThemedText type="default" style={styles.recentEmpty}>
-              No recent timesheets.
-            </ThemedText>
-          ) : (
-            recent.timesheets.map((ts) => (
-              <View key={ts.$id} style={styles.recentRow}>
-                <View style={styles.recentDot} />
-                <View style={{ flex: 1 }}>
-                  <ThemedText type="default" style={styles.recentRowTitle} numberOfLines={1}>
-                    {ts.reportingPeriodLabel || ts.reportingPeriodId || 'Timesheet'}
-                  </ThemedText>
-                  <ThemedText type="default" style={styles.recentRowMeta} numberOfLines={1}>
-                    {formatShortDate(ts.$createdAt)} • {ts.status || 'draft'}
-                  </ThemedText>
-                </View>
-              </View>
-            ))
-          )}
-        </View>
       </ScrollView>
       <HrBottomNav />
     </ThemedView>
@@ -417,6 +411,26 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
     marginTop: 3,
+  },
+  welcomeMetaRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  metaRoleChip: {
+    paddingHorizontal: 7,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: '#FFB803',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metaRoleChipText: {
+    fontSize: 9,
+    color: '#054653',
+    fontWeight: '800',
   },
   roleChip: {
     paddingHorizontal: 8,
