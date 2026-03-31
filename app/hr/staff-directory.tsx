@@ -152,7 +152,21 @@ export default function HrStaffDirectoryScreen() {
   };
 
   const filteredRoles = useMemo(
-    () => roles.filter((r) => String(r.staffCategory || '') === String(newStaff.staffCategory || 'Associate')),
+    () => {
+      const sample = roles.find((r) => r && typeof r === 'object') as any;
+      const candidates = ['type', 'kind', 'roleType', 'category'];
+      const kindKey = sample ? (candidates.find((k) => k in sample) || null) : null;
+      const positionsOnly = roles.filter((r) => {
+        if (!kindKey) return true;
+        const k = String((r as any)?.[kindKey] ?? '').trim().toLowerCase();
+        // Staff uses "Position" — show positions, and treat missing kind as legacy positions.
+        if (!k) return true;
+        return k === 'position';
+      });
+      return positionsOnly.filter(
+        (r) => String(r.staffCategory || '') === String(newStaff.staffCategory || 'Associate')
+      );
+    },
     [roles, newStaff.staffCategory]
   );
 

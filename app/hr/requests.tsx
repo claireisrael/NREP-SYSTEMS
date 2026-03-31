@@ -262,6 +262,11 @@ export default function HrRequestsScreen() {
   const canSeeCompleted = isFinanceUser || isSeniorManager;
 
   const openApprove = (doc: any) => {
+    // Hard rule (matches web): no self-approval.
+    if (String(doc?.userId || '') === String(user?.$id || '')) {
+      Alert.alert('Not allowed', 'You cannot approve your own request.');
+      return;
+    }
     const queue = (doc?.__queue || '') as any;
     setApproveTarget(doc);
     setApproveStage(queue === 'department' ? 'department' : queue === 'l1' ? 'l1' : queue === 'l2' ? 'l2' : 'finance');
@@ -282,6 +287,11 @@ export default function HrRequestsScreen() {
   };
 
   const openReject = (doc: any) => {
+    // Hard rule (matches web): no self-rejection as approver on own request.
+    if (String(doc?.userId || '') === String(user?.$id || '')) {
+      Alert.alert('Not allowed', 'You cannot reject your own request.');
+      return;
+    }
     setRejectTarget(doc);
     setRejectReason('');
     setRejectModalOpen(true);
@@ -301,6 +311,9 @@ export default function HrRequestsScreen() {
       const now = new Date().toISOString();
       const meId = user.$id;
       const meName = user.name || user.email || 'Approver';
+      if (String(approveTarget?.userId || '') === String(meId)) {
+        throw new Error('You cannot approve your own request.');
+      }
 
       if (approveStage === 'department') {
         if (!approveSelectedUserId) throw new Error('Select an L1 approver to continue.');
@@ -399,6 +412,9 @@ export default function HrRequestsScreen() {
     try {
       setRejecting(true);
       const now = new Date().toISOString();
+      if (String(rejectTarget?.userId || '') === String(user.$id)) {
+        throw new Error('You cannot reject your own request.');
+      }
       const stage = String(rejectTarget.approvalStage || '').toUpperCase();
 
       const updateData: any = {
@@ -498,9 +514,16 @@ export default function HrRequestsScreen() {
             onPress={() => setActiveTab('approvals')}
             style={[styles.segment, activeTab === 'approvals' && styles.segmentActive]}
           >
-            <Text style={[styles.segmentText, activeTab === 'approvals' && styles.segmentTextActive]}>
-              Approvals
-            </Text>
+            <View style={styles.segmentWithCount}>
+              <Text style={[styles.segmentText, activeTab === 'approvals' && styles.segmentTextActive]}>
+                Approvals
+              </Text>
+              {approvalItems.length > 0 ? (
+                <View style={styles.segmentCountPill}>
+                  <Text style={styles.segmentCountText}>{approvalItems.length}</Text>
+                </View>
+              ) : null}
+            </View>
           </Pressable>
           {canSeeCompleted ? (
             <Pressable
@@ -583,50 +606,66 @@ export default function HrRequestsScreen() {
                 </View>
 
                 <View style={styles.listCard}>
-                  {pageItems.map((r) => {
-                    const canEdit = canEditRequest(r, user);
-                    const canDelete = String(r.status || '').toUpperCase() === 'DRAFT';
-                    const t = typeColor(r.requestType);
-                    return (
-                      <Pressable key={r.$id} style={styles.row} onPress={() => router.push(`/hr/requests/${r.$id}` as any)}>
-                        <View style={styles.rowLeft}>
-                          <View style={[styles.typeIconWrap, { backgroundColor: t.bg }]}>
-                            <MaterialCommunityIcons name={t.icon as any} size={18} color={t.fg} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.rowTitle} numberOfLines={1}>
-                              {r.subject || r.title || r.requestId || 'General request'}
-                            </Text>
-                            <Text style={styles.rowMeta} numberOfLines={1}>
-                              {r.requestId ? `${r.requestId} • ` : ''}
-                              {r.submissionDate ? new Date(r.submissionDate).toLocaleDateString() : ''}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={styles.rowRight}>
-                          <View style={[styles.badge, stageBadgeStyle(r).pill]}>
-                            <Text style={[styles.badgeText, stageBadgeStyle(r).text]}>{stageLabel(r)}</Text>
-                          </View>
-                          <View style={styles.rowActions}>
-                            <Pressable style={styles.actionIcon} onPress={() => router.push(`/hr/requests/${r.$id}` as any)}>
-                              <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
-                            </Pressable>
-                            {canEdit ? (
-                              <Pressable style={styles.actionIcon} onPress={() => router.push(`/hr/requests/${r.$id}/edit` as any)}>
-                                <MaterialCommunityIcons name="pencil-outline" size={16} color="#054653" />
-                              </Pressable>
-                            ) : null}
-                            {canDelete ? (
-                              <Pressable style={styles.actionIcon} onPress={() => openDeleteModal(r)}>
-                                <MaterialCommunityIcons name="trash-can-outline" size={16} color="#b91c1c" />
-                              </Pressable>
-                            ) : null}
-                          </View>
-                        </View>
+                  {filtered.length === 0 ? (
+                    <View style={styles.emptyBox}>
+                      <Text style={styles.emptyText}>No requests match your filters.</Text>
+                      <Pressable
+                        onPress={() => {
+                          setSearch('');
+                          setStatusFilter('all');
+                          setPage(0);
+                        }}
+                        style={styles.clearFiltersBtn}
+                      >
+                        <Text style={styles.clearFiltersText}>Clear filters</Text>
                       </Pressable>
-                    );
-                  })}
+                    </View>
+                  ) : (
+                    pageItems.map((r) => {
+                      const canEdit = canEditRequest(r, user);
+                      const canDelete = String(r.status || '').toUpperCase() === 'DRAFT';
+                      const t = typeColor(r.requestType);
+                      return (
+                        <Pressable key={r.$id} style={styles.row} onPress={() => router.push(`/hr/requests/${r.$id}` as any)}>
+                          <View style={styles.rowLeft}>
+                            <View style={[styles.typeIconWrap, { backgroundColor: t.bg }]}>
+                              <MaterialCommunityIcons name={t.icon as any} size={18} color={t.fg} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.rowTitle} numberOfLines={1}>
+                                {r.subject || r.title || r.requestId || 'General request'}
+                              </Text>
+                              <Text style={styles.rowMeta} numberOfLines={1}>
+                                {r.requestId ? `${r.requestId} • ` : ''}
+                                {r.submissionDate ? new Date(r.submissionDate).toLocaleDateString() : ''}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.rowRight}>
+                            <View style={[styles.badge, stageBadgeStyle(r).pill]}>
+                              <Text style={[styles.badgeText, stageBadgeStyle(r).text]}>{stageLabel(r)}</Text>
+                            </View>
+                            <View style={styles.rowActions}>
+                              <Pressable style={styles.actionIcon} onPress={() => router.push(`/hr/requests/${r.$id}` as any)}>
+                                <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
+                              </Pressable>
+                              {canEdit ? (
+                                <Pressable style={styles.actionIcon} onPress={() => router.push(`/hr/requests/${r.$id}/edit` as any)}>
+                                  <MaterialCommunityIcons name="pencil-outline" size={16} color="#054653" />
+                                </Pressable>
+                              ) : null}
+                              {canDelete ? (
+                                <Pressable style={styles.actionIcon} onPress={() => openDeleteModal(r)}>
+                                  <MaterialCommunityIcons name="trash-can-outline" size={16} color="#b91c1c" />
+                                </Pressable>
+                              ) : null}
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })
+                  )}
                 </View>
               </>
             ) : activeTab === 'approvals' ? (
@@ -668,12 +707,20 @@ export default function HrRequestsScreen() {
                             <MaterialCommunityIcons name="pencil-outline" size={16} color="#054653" />
                           </Pressable>
                         ) : null}
-                        <Pressable style={styles.approveBtn} onPress={() => openApprove(r)}>
-                          <Text style={styles.approveBtnText}>Approve</Text>
-                        </Pressable>
-                        <Pressable style={styles.rejectBtn} onPress={() => openReject(r)}>
-                          <Text style={styles.rejectBtnText}>Reject</Text>
-                        </Pressable>
+                        {String(r.userId || '') === String(user.$id) ? (
+                          <View style={styles.selfApprovalPill}>
+                            <Text style={styles.selfApprovalText}>Your request</Text>
+                          </View>
+                        ) : (
+                          <>
+                            <Pressable style={styles.actionIcon} onPress={() => openApprove(r)}>
+                              <MaterialCommunityIcons name="check" size={18} color="#047857" />
+                            </Pressable>
+                            <Pressable style={styles.actionIcon} onPress={() => openReject(r)}>
+                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                            </Pressable>
+                          </>
+                        )}
                       </View>
                     </View>
                       ))}
@@ -910,7 +957,7 @@ export default function HrRequestsScreen() {
               <MaterialCommunityIcons name="close-circle-outline" size={22} color="#b91c1c" />
             </View>
             <Text style={styles.confirmTitle}>Reject request</Text>
-            <Text style={styles.confirmText}>Provide a reason. The request will revert to the correct previous stage like the web workflow.</Text>
+            <Text style={styles.confirmText}>Provide a reason for rejection.</Text>
 
             <View style={{ marginTop: 12 }}>
               <Text style={styles.modalLabel}>Rejection reason *</Text>
@@ -1240,6 +1287,17 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   emptyText: { color: '#6b7280', fontSize: 12, fontWeight: '600' },
+  clearFiltersBtn: {
+    marginTop: 10,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  clearFiltersText: { color: '#054653', fontSize: 12, fontWeight: '900' },
   metricsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   metricChip: {
     flex: 1,
@@ -1329,22 +1387,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   approvalActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  approveBtn: {
-    borderRadius: 12,
-    backgroundColor: '#047857',
+  // approve/reject in approvals tab use icon buttons (actionIcon)
+  selfApprovalPill: {
+    borderRadius: 999,
+    backgroundColor: '#f3f4f6',
     paddingHorizontal: 10,
     paddingVertical: 8,
-  },
-  approveBtnText: { color: '#ffffff', fontSize: 11, fontWeight: '900' },
-  rejectBtn: {
-    borderRadius: 12,
-    backgroundColor: '#fef2f2',
     borderWidth: 1,
-    borderColor: '#fecaca',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderColor: '#e5e7eb',
   },
-  rejectBtnText: { color: '#b91c1c', fontSize: 11, fontWeight: '900' },
+  selfApprovalText: { color: '#6b7280', fontSize: 11, fontWeight: '900' },
   paginationRow: {
     marginTop: 12,
     flexDirection: 'row',
@@ -1441,6 +1493,17 @@ const styles = StyleSheet.create({
   segmentActive: { borderColor: '#054653', backgroundColor: '#eef2f2' },
   segmentText: { fontSize: 11, color: '#6b7280', fontWeight: '800' },
   segmentTextActive: { color: '#054653' },
+  segmentWithCount: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  segmentCountPill: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    backgroundColor: '#054653',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentCountText: { color: '#ffffff', fontSize: 11, fontWeight: '900' },
 
   modalLabel: { color: '#111827', fontSize: 12, fontWeight: '800', marginTop: 0 },
   modalInput: {

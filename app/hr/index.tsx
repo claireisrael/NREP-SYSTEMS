@@ -61,7 +61,7 @@ export default function HrLoginScreen() {
     setError(null);
 
     try {
-      await login(trimmedEmail, trimmedPassword);
+      await login(trimmedEmail, trimmedPassword, rememberMe);
       router.replace('/hr/home');
     } catch (err: any) {
       console.error('HR login failed', err);

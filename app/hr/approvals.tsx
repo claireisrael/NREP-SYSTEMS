@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
@@ -416,22 +417,31 @@ export default function HrApprovalsScreen() {
         </View>
 
         <View style={styles.authorityCard}>
-          <View style={styles.authorityLeft}>
-            <View style={styles.authorityIcon}>
-              <MaterialCommunityIcons name="shield-account-outline" size={18} color="#0891b2" />
+          <LinearGradient
+            colors={['#054653', '#0b6b63', '#FFB803']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.authorityGradient}
+          >
+            <View style={styles.authorityLeft}>
+              <View style={styles.authorityIcon}>
+                <MaterialCommunityIcons name="shield-account-outline" size={18} color="#054653" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.authorityTitle}>Approval Authority</Text>
+                <Text style={styles.authorityText}>
+                  Role: <Text style={styles.authorityTextStrong}>{String(user?.systemRole || 'N/A')}</Text> | Department:{' '}
+                  <Text style={styles.authorityTextStrong}>{String((user as any)?.departmentName || (user as any)?.departmentId || 'N/A')}</Text>
+                </Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.authorityTitle}>Approval Authority</Text>
-              <Text style={styles.authorityText}>
-                Role: <Text style={styles.authorityTextStrong}>{String(user?.systemRole || 'N/A')}</Text> | Department:{' '}
-                <Text style={styles.authorityTextStrong}>{String((user as any)?.departmentName || (user as any)?.departmentId || 'N/A')}</Text>
+            <View style={styles.pendingBadge}>
+              <MaterialCommunityIcons name="clock-outline" size={13} color="#0f172a" />
+              <Text style={styles.pendingBadgeText}>
+                <Text style={styles.pendingCountStrong}>{approvalItems.length}</Text> Pending
               </Text>
             </View>
-          </View>
-          <View style={styles.pendingBadge}>
-            <MaterialCommunityIcons name="clock-outline" size={13} color="#0f172a" />
-            <Text style={styles.pendingBadgeText}>{approvalItems.length} Pending</Text>
-          </View>
+          </LinearGradient>
         </View>
 
         <View style={styles.tabsRow}>
@@ -521,13 +531,15 @@ export default function HrApprovalsScreen() {
                         </Pressable>
                         {canApproveRequest(r, user, financeDeptId) ? (
                           <>
-                            <Pressable style={styles.approveBtn} onPress={() => openApprove(r)}>
-                              <Text style={styles.approveBtnText}>
-                                {String(r?.approvalStage || '').toUpperCase() === 'FINANCE_COMPLETION' ? 'Complete' : 'Approve'}
-                              </Text>
+                            <Pressable style={styles.actionIcon} onPress={() => openApprove(r)}>
+                              <MaterialCommunityIcons
+                                name={String(r?.approvalStage || '').toUpperCase() === 'FINANCE_COMPLETION' ? 'check-all' : 'check'}
+                                size={18}
+                                color="#047857"
+                              />
                             </Pressable>
-                            <Pressable style={styles.rejectBtn} onPress={() => openReject(r)}>
-                              <Text style={styles.rejectBtnText}>Reject</Text>
+                            <Pressable style={styles.actionIcon} onPress={() => openReject(r)}>
+                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
                             </Pressable>
                           </>
                         ) : (
@@ -771,7 +783,7 @@ export default function HrApprovalsScreen() {
             </View>
             <Text style={styles.confirmTitle}>Reject request</Text>
             <Text style={styles.confirmText}>
-              Provide a reason. The request will revert to the correct previous stage like the web workflow.
+              Provide a reason for rejection.
             </Text>
 
             <View style={{ marginTop: 12 }}>
@@ -931,9 +943,12 @@ const styles = StyleSheet.create({
   authorityCard: {
     marginBottom: 10,
     borderRadius: 14,
-    borderWidth: 2,
-    borderColor: '#22d3ee',
-    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
+  },
+  authorityGradient: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -946,18 +961,18 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 999,
-    backgroundColor: '#e0f2fe',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  authorityTitle: { color: '#0f172a', fontWeight: '800', fontSize: 13, marginBottom: 2 },
-  authorityText: { color: '#475569', fontSize: 12 },
-  authorityTextStrong: { color: '#0f172a', fontWeight: '700' },
+  authorityTitle: { color: '#ffffff', fontWeight: '900', fontSize: 13, marginBottom: 2 },
+  authorityText: { color: 'rgba(255,255,255,0.9)', fontSize: 12 },
+  authorityTextStrong: { color: '#ffffff', fontWeight: '900' },
   pendingBadge: {
     borderRadius: 999,
-    backgroundColor: '#cffafe',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1,
-    borderColor: '#67e8f9',
+    borderColor: 'rgba(255,255,255,0.85)',
     paddingHorizontal: 10,
     height: 28,
     flexDirection: 'row',
@@ -965,6 +980,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   pendingBadgeText: { color: '#0f172a', fontSize: 11, fontWeight: '800' },
+  pendingCountStrong: { color: '#7c3aed', fontWeight: '900' },
   tabBtn: {
     borderRadius: 999,
     borderWidth: 1,
@@ -1043,24 +1059,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  approveBtn: {
-    paddingHorizontal: 10,
-    height: 28,
-    borderRadius: 999,
-    backgroundColor: '#047857',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  approveBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
-  rejectBtn: {
-    paddingHorizontal: 10,
-    height: 28,
-    borderRadius: 999,
-    backgroundColor: '#b91c1c',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rejectBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
+  // approve/reject now use icon buttons (actionIcon)
   readOnlyPill: {
     paddingHorizontal: 10,
     height: 28,

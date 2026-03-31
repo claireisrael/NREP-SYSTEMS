@@ -25,7 +25,15 @@ export default function HrTravelScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const canApprove = user?.systemRole === 'Senior Manager' || user?.systemRole === 'Supervisor';
+  const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
+    (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
+    '') as string;
+  const isFinanceUser =
+    (!!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId) ||
+    String((user as any)?.departmentName || '').toLowerCase().includes('finance') ||
+    String((user as any)?.systemRole || '').toLowerCase().includes('finance');
+  const canApprove =
+    user?.systemRole === 'Senior Manager' || user?.systemRole === 'Supervisor' || isFinanceUser;
   const hasAdminAccess = user?.systemRole === 'Senior Manager';
   const [activeTab, setActiveTab] = useState<'my' | 'approvals'>('my');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>(
@@ -38,10 +46,23 @@ export default function HrTravelScreen() {
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [pendingL1, setPendingL1] = useState<any[]>([]);
   const [pendingL2, setPendingL2] = useState<any[]>([]);
+  const [pendingFinance, setPendingFinance] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [approveTarget, setApproveTarget] = useState<any | null>(null);
+  const [approveStage, setApproveStage] = useState<'l1' | 'l2' | 'finance' | null>(null);
+  const [approveComments, setApproveComments] = useState('');
+  const [approving, setApproving] = useState(false);
+
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<any | null>(null);
+  const [rejectStage, setRejectStage] = useState<'l1' | 'l2' | 'finance' | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) router.replace('/hr');
@@ -53,7 +74,7 @@ export default function HrTravelScreen() {
       setError(null);
       setLoading(true);
 
-      const [mine, l1, l2] = await Promise.all([
+      const [mine, l1, l2, fin] = await Promise.all([
         withTimeout(
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
             Query.equal('userId', user.$id),
@@ -87,18 +108,37 @@ export default function HrTravelScreen() {
               'Loading L2 approvals timed out.',
             )
           : Promise.resolve({ documents: [] } as any),
+        isFinanceUser
+          ? withTimeout(
+              hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
+                // Web parity: finance queue items are those that finished SM/L2 and are awaiting finance completion.
+                // Some environments use different status strings; include both to avoid missing items.
+                Query.or([
+                  Query.equal('status', 'pending_finance'),
+                  Query.equal('status', 'PENDING_FINANCE'),
+                  Query.equal('status', 'l2_approved'),
+                  Query.equal('status', 'L2_APPROVED'),
+                ]),
+                Query.orderDesc('l2ApprovalDate'),
+                Query.limit(100),
+              ]),
+              12000,
+              'Loading Finance approvals timed out.',
+            )
+          : Promise.resolve({ documents: [] } as any),
       ]);
 
       setMyRequests((mine as any).documents ?? []);
       setPendingL1((l1 as any).documents ?? []);
       setPendingL2((l2 as any).documents ?? []);
+      setPendingFinance((fin as any).documents ?? []);
     } catch (e: any) {
       console.error('Failed to load travel requests', e);
       setError(e?.message || 'Failed to load travel requests');
     } finally {
       setLoading(false);
     }
-  }, [user?.$id, canApprove]);
+  }, [user?.$id, canApprove, isFinanceUser]);
 
   useEffect(() => {
     if (!isLoading && user?.$id) {
@@ -112,12 +152,15 @@ export default function HrTravelScreen() {
     setRefreshing(false);
   }, [loadData]);
 
-  const approvalTotal = useMemo(() => pendingL1.length + pendingL2.length, [pendingL1, pendingL2]);
+  const approvalTotal = useMemo(
+    () => pendingL1.length + pendingL2.length + pendingFinance.length,
+    [pendingL1, pendingL2, pendingFinance],
+  );
   const myStats = useMemo(() => {
     const total = myRequests.length;
-    const pending = myRequests.filter((r) =>
-      ['pending', 'l1_approved'].includes(String(r.status || '').toLowerCase()),
-    ).length;
+      const pending = myRequests.filter((r) =>
+        ['pending', 'l1_approved', 'pending_finance'].includes(String(r.status || '').toLowerCase()),
+      ).length;
     const approved = myRequests.filter((r) =>
       ['l2_approved', 'completed'].includes(String(r.status || '').toLowerCase()),
     ).length;
@@ -180,6 +223,139 @@ export default function HrTravelScreen() {
     }
   };
 
+  const canActOnApproval = useCallback(
+    (t: any, stage: 'l1' | 'l2' | 'finance') => {
+      if (!t || !user?.$id) return false;
+      const requesterId = String(t.userId || '');
+      // Web parity: no self-approval.
+      if (requesterId && requesterId === String(user.$id)) return false;
+      const status = String(t.status || '').toLowerCase();
+      if (stage === 'l1') return String(t.l1ApproverId || '') === String(user.$id) && status === 'pending';
+      if (stage === 'l2') return String(t.l2ApproverId || '') === String(user.$id) && status === 'l1_approved';
+      return isFinanceUser && ['pending_finance', 'l2_approved'].includes(status);
+    },
+    [user?.$id, isFinanceUser],
+  );
+
+  const resolveActiveL2ApproverId = useCallback(async () => {
+    // Mirror common web config: route L1-approved items to an active L2 approver.
+    const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS, [
+      Query.equal('level', 'L2'),
+      Query.equal('isActive', true),
+      Query.limit(1),
+    ]);
+    const d = (res as any)?.documents?.[0];
+    const uid = String(d?.userId || '').trim();
+    if (!uid) throw new Error('No active L2 approver is configured. Please set one in Travel Approvers (Admin).');
+    return uid;
+  }, []);
+
+  const openApprove = (t: any, stage: 'l1' | 'l2' | 'finance') => {
+    if (!canActOnApproval(t, stage)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
+      return;
+    }
+    setApproveTarget(t);
+    setApproveStage(stage);
+    setApproveComments('');
+    setApproveModalOpen(true);
+  };
+
+  const closeApprove = () => {
+    if (approving) return;
+    setApproveModalOpen(false);
+    setApproveTarget(null);
+    setApproveStage(null);
+    setApproveComments('');
+  };
+
+  const confirmApprove = async () => {
+    if (!approveTarget?.$id || !approveStage || !user?.$id) return;
+    if (!canActOnApproval(approveTarget, approveStage)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
+      return;
+    }
+    setApproving(true);
+    try {
+      const now = new Date().toISOString();
+      const update: any = {};
+
+      if (approveStage === 'l1') {
+        const l2Id = await resolveActiveL2ApproverId();
+        update.status = 'l1_approved';
+        update.l1ApprovalDate = now;
+        update.l1Comments = approveComments.trim() || null;
+        update.l2ApproverId = l2Id;
+      } else if (approveStage === 'l2') {
+        // After SM/L2 approval, the request should wait for Finance completion.
+        update.status = 'pending_finance';
+        update.l2ApprovalDate = now;
+        update.l2Comments = approveComments.trim() || null;
+      } else {
+        update.status = 'completed';
+        update.completedDate = now;
+        update.completionComments = approveComments.trim() || null;
+      }
+
+      await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, String(approveTarget.$id), update);
+      closeApprove();
+      await loadData();
+    } catch (e: any) {
+      Alert.alert('Approve failed', e?.message || 'Unable to approve this travel request.');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const openReject = (t: any, stage: 'l1' | 'l2' | 'finance') => {
+    if (!canActOnApproval(t, stage)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
+      return;
+    }
+    setRejectTarget(t);
+    setRejectStage(stage);
+    setRejectReason('');
+    setRejectModalOpen(true);
+  };
+
+  const closeReject = () => {
+    if (rejecting) return;
+    setRejectModalOpen(false);
+    setRejectTarget(null);
+    setRejectStage(null);
+    setRejectReason('');
+  };
+
+  const confirmReject = async () => {
+    if (!rejectTarget?.$id || !rejectStage || !user?.$id) return;
+    if (!canActOnApproval(rejectTarget, rejectStage)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
+      return;
+    }
+    const reason = rejectReason.trim();
+    if (!reason) {
+      Alert.alert('Validation', 'Please enter a rejection reason.');
+      return;
+    }
+    setRejecting(true);
+    try {
+      const now = new Date().toISOString();
+      const update: any = {
+        status: 'rejected',
+        rejectionReason: reason,
+        rejectedBy: String(user.$id),
+        rejectionDate: now,
+      };
+      await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, String(rejectTarget.$id), update);
+      closeReject();
+      await loadData();
+    } catch (e: any) {
+      Alert.alert('Reject failed', e?.message || 'Unable to reject this travel request.');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   return (
     <ThemedView style={styles.container}>
       <ScrollView
@@ -203,8 +379,17 @@ export default function HrTravelScreen() {
               </View>
             </View>
             {activeTab !== 'my' ? (
-              <View style={styles.headerCountPill}>
-                <Text style={styles.headerCountText}>{approvalTotal}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Pressable
+                  onPress={() => setActiveTab('my')}
+                  style={styles.headerBackBtn}
+                  hitSlop={8}
+                >
+                  <MaterialCommunityIcons name="chevron-left" size={20} color="#054653" />
+                </Pressable>
+                <View style={styles.headerCountPill}>
+                  <Text style={styles.headerCountText}>{approvalTotal}</Text>
+                </View>
               </View>
             ) : null}
           </View>
@@ -416,7 +601,7 @@ export default function HrTravelScreen() {
                 <Text style={styles.emptyText}>No L1 approvals.</Text>
               ) : (
                 pendingL1.map((t) => (
-                  <Pressable key={t.$id} style={styles.row} onPress={() => {}}>
+                  <View key={t.$id} style={styles.row}>
                     <View style={styles.rowLeft}>
                       <MaterialCommunityIcons name="clipboard-check-outline" size={18} color="#054653" />
                       <View style={{ flex: 1 }}>
@@ -430,12 +615,30 @@ export default function HrTravelScreen() {
                         </Text>
                       </View>
                     </View>
-                    <View style={[styles.badge, badgeStyle(t.status).pill]}>
-                      <Text style={[styles.badgeText, badgeStyle(t.status).text]}>
-                        {badgeLabel(t.status)}
-                      </Text>
+                    <View style={styles.rowRight}>
+                      <View style={[styles.badge, badgeStyle(t.status).pill]}>
+                        <Text style={[styles.badgeText, badgeStyle(t.status).text]}>{badgeLabel(t.status)}</Text>
+                      </View>
+                      <View style={styles.rowActions}>
+                        <Pressable
+                          style={styles.actionIcon}
+                          onPress={() => router.push(`/hr/travel/${t.requestId || t.$id}`)}
+                        >
+                          <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
+                        </Pressable>
+                        {canActOnApproval(t, 'l1') ? (
+                          <>
+                            <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'l1')}>
+                              <MaterialCommunityIcons name="check" size={18} color="#047857" />
+                            </Pressable>
+                            <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'l1')}>
+                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                            </Pressable>
+                          </>
+                        ) : null}
+                      </View>
                     </View>
-                  </Pressable>
+                  </View>
                 ))
               )}
             </View>
@@ -446,7 +649,7 @@ export default function HrTravelScreen() {
                 <Text style={styles.emptyText}>No L2 approvals.</Text>
               ) : (
                 pendingL2.map((t) => (
-                  <Pressable key={t.$id} style={styles.row} onPress={() => {}}>
+                  <View key={t.$id} style={styles.row}>
                     <View style={styles.rowLeft}>
                       <MaterialCommunityIcons name="clipboard-check-outline" size={18} color="#054653" />
                       <View style={{ flex: 1 }}>
@@ -460,15 +663,83 @@ export default function HrTravelScreen() {
                         </Text>
                       </View>
                     </View>
-                    <View style={[styles.badge, badgeStyle(t.status).pill]}>
-                      <Text style={[styles.badgeText, badgeStyle(t.status).text]}>
-                        {badgeLabel(t.status)}
-                      </Text>
+                    <View style={styles.rowRight}>
+                      <View style={[styles.badge, badgeStyle(t.status).pill]}>
+                        <Text style={[styles.badgeText, badgeStyle(t.status).text]}>{badgeLabel(t.status)}</Text>
+                      </View>
+                      <View style={styles.rowActions}>
+                        <Pressable
+                          style={styles.actionIcon}
+                          onPress={() => router.push(`/hr/travel/${t.requestId || t.$id}`)}
+                        >
+                          <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
+                        </Pressable>
+                        {canActOnApproval(t, 'l2') ? (
+                          <>
+                            <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'l2')}>
+                              <MaterialCommunityIcons name="check" size={18} color="#047857" />
+                            </Pressable>
+                            <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'l2')}>
+                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                            </Pressable>
+                          </>
+                        ) : null}
+                      </View>
                     </View>
-                  </Pressable>
+                  </View>
                 ))
               )}
             </View>
+
+            {isFinanceUser ? (
+              <View style={styles.listCard}>
+                <Text style={styles.sectionLabel}>Pending Finance</Text>
+                {pendingFinance.length === 0 ? (
+                  <Text style={styles.emptyText}>No finance items.</Text>
+                ) : (
+                  pendingFinance.map((t) => (
+                    <View key={t.$id} style={styles.row}>
+                      <View style={styles.rowLeft}>
+                        <MaterialCommunityIcons name="cash-check" size={18} color="#054653" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>
+                            {t.userName ? `${t.userName} • ` : ''}
+                            {t.destination || t.activityName || 'Travel request'}
+                          </Text>
+                          <Text style={styles.rowMeta} numberOfLines={1}>
+                            {t.requestId ? `${t.requestId} • ` : ''}
+                            {t.l2ApprovalDate ? new Date(t.l2ApprovalDate).toLocaleDateString() : ''}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.rowRight}>
+                        <View style={[styles.badge, badgeStyle(t.status).pill]}>
+                          <Text style={[styles.badgeText, badgeStyle(t.status).text]}>{badgeLabel(t.status)}</Text>
+                        </View>
+                        <View style={styles.rowActions}>
+                          <Pressable
+                            style={styles.actionIcon}
+                            onPress={() => router.push(`/hr/travel/${t.requestId || t.$id}`)}
+                          >
+                            <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
+                          </Pressable>
+                          {canActOnApproval(t, 'finance') ? (
+                            <>
+                              <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'finance')}>
+                                <MaterialCommunityIcons name="check-all" size={18} color="#047857" />
+                              </Pressable>
+                              <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'finance')}>
+                                <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                              </Pressable>
+                            </>
+                          ) : null}
+                        </View>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -524,6 +795,86 @@ export default function HrTravelScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={approveModalOpen} transparent animationType="fade" onRequestClose={closeApprove}>
+        <View style={styles.confirmBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeApprove} />
+          <View style={styles.confirmCard}>
+            <View style={[styles.confirmIcon, { backgroundColor: '#ecfdf5', borderColor: '#bbf7d0' }]}>
+              <MaterialCommunityIcons name="check-decagram" size={22} color="#047857" />
+            </View>
+            <Text style={styles.confirmTitle}>Approve request?</Text>
+            <Text style={styles.confirmText}>
+              {approveStage === 'l1'
+                ? 'This approves Level 1 and forwards to Level 2.'
+                : approveStage === 'l2'
+                  ? 'This completes Level 2 approval and sends it to Finance.'
+                  : 'This completes Finance processing.'}
+            </Text>
+            <TextInput
+              value={approveComments}
+              onChangeText={setApproveComments}
+              placeholder="Comments (optional)"
+              placeholderTextColor="#9ca3af"
+              style={styles.modalInput}
+              multiline
+            />
+            <View style={styles.confirmActions}>
+              <Pressable onPress={closeApprove} style={[styles.confirmBtn, styles.confirmBtnOutline]} disabled={approving}>
+                <Text style={styles.confirmBtnTextOutline}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={confirmApprove}
+                style={[styles.confirmBtn, styles.confirmBtnApprove, approving && { opacity: 0.7 }]}
+                disabled={approving}
+              >
+                <View style={styles.confirmBtnRow}>
+                  {approving ? <ActivityIndicator color="#ffffff" /> : null}
+                  <Text style={styles.confirmBtnTextApprove}>
+                    {approving ? 'Working…' : approveStage === 'finance' ? 'Complete' : 'Approve'}
+                  </Text>
+                </View>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={rejectModalOpen} transparent animationType="fade" onRequestClose={closeReject}>
+        <View style={styles.confirmBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeReject} />
+          <View style={styles.confirmCard}>
+            <View style={styles.confirmIcon}>
+              <MaterialCommunityIcons name="close-circle-outline" size={22} color="#b91c1c" />
+            </View>
+            <Text style={styles.confirmTitle}>Reject request?</Text>
+            <Text style={styles.confirmText}>This will mark the request as rejected and return it to the requester.</Text>
+            <TextInput
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              placeholder="Rejection reason *"
+              placeholderTextColor="#9ca3af"
+              style={styles.modalInput}
+              multiline
+            />
+            <View style={styles.confirmActions}>
+              <Pressable onPress={closeReject} style={[styles.confirmBtn, styles.confirmBtnOutline]} disabled={rejecting}>
+                <Text style={styles.confirmBtnTextOutline}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={confirmReject}
+                style={[styles.confirmBtn, styles.confirmBtnDanger, rejecting && { opacity: 0.7 }]}
+                disabled={rejecting}
+              >
+                <View style={styles.confirmBtnRow}>
+                  {rejecting ? <ActivityIndicator color="#ffffff" /> : null}
+                  <Text style={styles.confirmBtnTextDanger}>{rejecting ? 'Rejecting…' : 'Reject'}</Text>
+                </View>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -548,7 +899,7 @@ function badgeLabel(status?: string) {
   const s = (status || '').toLowerCase();
   if (s === 'pending') return 'PENDING L1';
   if (s === 'l1_approved') return 'PENDING L2';
-  if (s === 'l2_approved') return 'APPROVED';
+  if (s === 'pending_finance' || s === 'l2_approved') return 'PENDING FINANCE';
   if (s === 'rejected') return 'REJECTED';
   if (s === 'completed') return 'COMPLETED';
   return (status || 'STATUS').toUpperCase();
@@ -559,8 +910,8 @@ function badgeStyle(status?: string) {
   if (s === 'rejected') {
     return { pill: { backgroundColor: '#fef2f2' }, text: { color: '#b91c1c' } };
   }
-  if (s === 'l2_approved') {
-    return { pill: { backgroundColor: '#ecfdf5' }, text: { color: '#047857' } };
+  if (s === 'pending_finance' || s === 'l2_approved') {
+    return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
   }
   if (s === 'l1_approved') {
     return { pill: { backgroundColor: '#eff6ff' }, text: { color: '#1d4ed8' } };
@@ -633,6 +984,16 @@ const styles = StyleSheet.create({
   headerCountText: {
     color: '#ffffff',
     fontWeight: '800',
+  },
+  headerBackBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   adminButton: {
     flexDirection: 'row',
@@ -880,6 +1241,22 @@ const styles = StyleSheet.create({
   actionIcon: {
     padding: 6,
   },
+  approveBtn: {
+    borderRadius: 999,
+    backgroundColor: '#054653',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  approveBtnText: { color: '#ffffff', fontSize: 11, fontWeight: '900' },
+  rejectBtn: {
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  rejectBtnText: { color: '#b91c1c', fontSize: 11, fontWeight: '900' },
 
   confirmBackdrop: {
     flex: 1,
@@ -951,9 +1328,49 @@ const styles = StyleSheet.create({
   confirmBtnDanger: {
     backgroundColor: '#b91c1c',
   },
+  confirmBtnApprove: {
+    backgroundColor: '#047857',
+  },
   confirmBtnRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   confirmBtnTextOutline: { color: '#054653', fontSize: 12, fontWeight: '900' },
   confirmBtnTextDanger: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
+  confirmBtnTextApprove: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
+  modalInput: {
+    marginTop: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 72,
+    color: '#0f172a',
+    textAlignVertical: 'top' as any,
+  },
+  approvalModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+  },
+  approvalInput: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 44,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlignVertical: 'top',
+  },
 });
 
 function withTimeout<T>(p: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {

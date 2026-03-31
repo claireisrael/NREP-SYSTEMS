@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -52,7 +52,7 @@ function getFirstName(name?: string | null, email?: string | null) {
 }
 
 export default function HrHomeScreen() {
-  const { user, isLoading, refreshProfile } = useHrAuth();
+  const { user, isLoading, refreshProfile, logout } = useHrAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const greeting = getGreeting();
@@ -67,31 +67,56 @@ export default function HrHomeScreen() {
     travel: [] as any[],
     requests: [] as any[],
   });
+  const [signingOut, setSigningOut] = useState(false);
+  const signingOutRef = useRef(false);
+  const loadSeqRef = useRef(0);
 
   useEffect(() => {
-    if (!isLoading && !user) {
+    signingOutRef.current = signingOut;
+  }, [signingOut]);
+
+  useEffect(() => {
+    if (!isLoading && !user && !signingOut) {
+      // When there is no HR user, always go back to the HR entry/login screen.
       router.replace('/hr');
     }
-  }, [isLoading, user, router]);
+  }, [isLoading, user, signingOut, router]);
 
   useFocusEffect(
     useCallback(() => {
+      if (!user || signingOut) return;
       refreshProfile();
-    }, [refreshProfile])
+    }, [refreshProfile, user, signingOut])
   );
 
+  const handleLogout = useCallback(async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    // Leave the dashboard immediately to avoid any post-logout API calls painting errors.
+    router.replace('/hr');
+    try {
+      await logout();
+    } catch {
+      // Even if logout fails, we still want to leave the HR area.
+    } finally {
+      setSigningOut(false);
+    }
+  }, [logout, router, signingOut]);
+
   const loadDashboardBits = useCallback(async () => {
-      if (!user?.$id) return;
+      const seq = ++loadSeqRef.current;
+      const userId = user?.$id;
+      if (!userId || signingOutRef.current) return;
       try {
         setCountsLoading(true);
         setCountsError(null);
         const [travelRes, reqRes, staffRes] = await Promise.all([
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-            Query.equal('userId', user.$id),
+            Query.equal('userId', userId),
             Query.limit(1),
           ]),
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-            Query.equal('userId', user.$id),
+            Query.equal('userId', userId),
             Query.limit(1),
           ]),
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
@@ -99,6 +124,7 @@ export default function HrHomeScreen() {
           ]),
         ]);
 
+        if (signingOutRef.current || loadSeqRef.current !== seq) return;
         setCounts({
           travel: (travelRes as any).total ?? (travelRes as any).documents?.length ?? 0,
           requests: (reqRes as any).total ?? (reqRes as any).documents?.length ?? 0,
@@ -107,26 +133,30 @@ export default function HrHomeScreen() {
 
         const [travelRecent, requestsRecent] = await Promise.all([
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-            Query.equal('userId', user.$id),
+            Query.equal('userId', userId),
             Query.orderDesc('submissionDate'),
             Query.limit(3),
           ]),
           hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-            Query.equal('userId', user.$id),
+            Query.equal('userId', userId),
             Query.orderDesc('submissionDate'),
             Query.limit(3),
           ]),
         ]);
 
+        if (signingOutRef.current || loadSeqRef.current !== seq) return;
         setRecent({
           travel: (travelRecent as any).documents ?? [],
           requests: (requestsRecent as any).documents ?? [],
         });
       } catch (e) {
-        console.error('Failed to load HR dashboard counts', e);
-        setCountsError((e as any)?.message || 'Failed to load counts');
+        // If logout happens mid-flight, Appwrite may return "not authorized". Ignore in that case.
+        if (!signingOutRef.current) {
+          console.error('Failed to load HR dashboard counts', e);
+          setCountsError((e as any)?.message || 'Failed to load counts');
+        }
       } finally {
-        setCountsLoading(false);
+        if (!signingOutRef.current && loadSeqRef.current === seq) setCountsLoading(false);
       }
   }, [user?.$id]);
 
@@ -189,9 +219,23 @@ export default function HrHomeScreen() {
             </View>
 
             <View style={styles.welcomeTextBlock}>
-              <ThemedText type="subtitle" style={styles.welcomeGreeting}>
-                {greeting}, {firstName}!
-              </ThemedText>
+              <View style={styles.welcomeGreetingRow}>
+                <ThemedText type="subtitle" style={[styles.welcomeGreeting, { flex: 1 }]}>
+                  {greeting}, {firstName}!
+                </ThemedText>
+                <Pressable
+                  onPress={handleLogout}
+                  disabled={signingOut}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.logoutIconBtn,
+                    pressed && { opacity: 0.85 },
+                    signingOut && { opacity: 0.6 },
+                  ]}
+                >
+                  <MaterialCommunityIcons name="logout" size={18} color="#b91c1c" />
+                </Pressable>
+              </View>
               <View style={styles.welcomeMetaRow}>
                 <ThemedText type="default" style={styles.welcomeMeta}>
                   {formatToday()}
@@ -406,6 +450,19 @@ const styles = StyleSheet.create({
     color: '#054653',
     fontSize: 16,
     fontWeight: '800',
+  },
+  welcomeGreetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  logoutIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   welcomeMeta: {
     color: '#6b7280',

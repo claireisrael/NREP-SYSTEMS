@@ -10,6 +10,7 @@ import {
   Switch,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -17,7 +18,10 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
@@ -109,6 +113,98 @@ export default function HrNewTravelRequestScreen() {
     attachments: [],
     comments: '',
   });
+
+  const downloadSubmittedRequest = useCallback(async () => {
+    if (!submittedRequestId) return;
+    try {
+      const doc = await getTravelRequestByRequestId(submittedRequestId);
+      if (!doc) throw new Error('Request not found.');
+
+      const expense = Array.isArray((doc as any).expenseBreakdown) ? (doc as any).expenseBreakdown : [];
+      const totalAmount = (doc as any).totalAmount ?? '';
+      const currency = (doc as any).currency ?? '';
+
+      const safe = (v: any) => String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 20px; color: #0f172a; }
+      .brand { background: linear-gradient(90deg, #054653, #0e706d, #FFB803); border-radius: 14px; padding: 14px 16px; color: white; }
+      .title { font-size: 18px; font-weight: 800; margin: 0; }
+      .sub { font-size: 12px; opacity: 0.92; margin: 6px 0 0; }
+      .card { margin-top: 14px; border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px 16px; }
+      .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid #f3f4f6; }
+      .row:first-child { border-top: 0; }
+      .k { font-size: 11px; color: #6b7280; font-weight: 700; }
+      .v { font-size: 12px; color: #0f172a; font-weight: 700; text-align: right; }
+      .muted { color: #6b7280; font-weight: 600; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { border-top: 1px solid #f3f4f6; padding: 10px 0; font-size: 12px; }
+      th { text-align: left; color: #6b7280; font-weight: 800; }
+      td:last-child { text-align: right; font-weight: 800; }
+    </style>
+  </head>
+  <body>
+    <div class="brand">
+      <p class="title">Travel Request</p>
+      <p class="sub">Request ID: ${safe((doc as any).requestId || submittedRequestId)}</p>
+    </div>
+
+    <div class="card">
+      <div class="row"><div class="k">Destination</div><div class="v">${safe((doc as any).destination || '')}</div></div>
+      <div class="row"><div class="k">Origin</div><div class="v">${safe((doc as any).origin || '')}</div></div>
+      <div class="row"><div class="k">Activity</div><div class="v">${safe((doc as any).activityName || '')}</div></div>
+      <div class="row"><div class="k">Travel type</div><div class="v">${safe((doc as any).travelType || '')}</div></div>
+      <div class="row"><div class="k">From</div><div class="v">${safe((doc as any).dateTimeFrom || '')}</div></div>
+      <div class="row"><div class="k">To</div><div class="v">${safe((doc as any).dateTimeTo || '')}</div></div>
+      <div class="row"><div class="k">Status</div><div class="v">${safe((doc as any).status || '')}</div></div>
+    </div>
+
+    <div class="card">
+      <div class="row"><div class="k">Total</div><div class="v">${safe(currency)} ${safe(totalAmount)}</div></div>
+      <div class="row"><div class="k">Payment method</div><div class="v">${safe((doc as any).paymentMethod || '')}</div></div>
+      <div class="row"><div class="k">Payment type</div><div class="v">${safe((doc as any).paymentType || '')}</div></div>
+      <div class="row"><div class="k">Comments</div><div class="v muted">${safe((doc as any).comments || '—')}</div></div>
+
+      <table>
+        <thead>
+          <tr><th>Expense</th><th>Subtotal</th></tr>
+        </thead>
+        <tbody>
+          ${
+            expense.length
+              ? expense
+                  .map((e: any) => {
+                    const purpose = safe(e?.purpose || 'Item');
+                    const subtotal = safe(e?.subtotal ?? '');
+                    return `<tr><td>${purpose}</td><td>${safe(currency)} ${subtotal}</td></tr>`;
+                  })
+                  .join('')
+              : `<tr><td class="muted">No expense items</td><td class="muted">—</td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>`;
+
+      const file = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(file.uri, {
+          UTI: 'com.adobe.pdf',
+          mimeType: 'application/pdf',
+          dialogTitle: `Travel Request ${submittedRequestId}`,
+        } as any);
+      } else {
+        Alert.alert('Saved', `PDF generated at:\n${file.uri}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Download failed', e?.message || 'Unable to download this request.');
+    }
+  }, [submittedRequestId]);
 
   const fs: any = FileSystem as any;
   const draftPath = useMemo(() => {
@@ -534,12 +630,18 @@ export default function HrNewTravelRequestScreen() {
               {submittedRequestId && !isEditMode ? (
                 <Pressable
                   onPress={() => {
-                    setShowSubmittedModal(false);
-                    router.replace(`/hr/travel/${submittedRequestId}` as any);
+                    downloadSubmittedRequest();
                   }}
-                  style={[styles.submittedBtn, styles.submittedBtnOutline]}
+                  style={[styles.submittedBtn, styles.submittedBtnGradient]}
                 >
-                  <Text style={styles.submittedBtnTextOutline}>View Request</Text>
+                  <LinearGradient
+                    colors={['#054653', '#0e706d', '#FFB803']}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={styles.submittedBtnGradientInner}
+                  >
+                    <Text style={styles.submittedBtnTextPrimary}>Download Travel Request</Text>
+                  </LinearGradient>
                 </Pressable>
               ) : null}
             </View>
@@ -1243,27 +1345,61 @@ function SelectModal({
   onClose: () => void;
   items: Array<{ key: string; label: string; onPress: () => void }>;
 }) {
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  // Header (~52) + sheet padding; keep list clear of bottom gesture/home area.
+  const sheetVerticalPadding = 12 * 2;
+  const headerApprox = 48;
+  const bottomReserve = Math.max(insets.bottom, 12) + 16;
+  const maxListHeight = Math.max(
+    220,
+    Math.min(440, Math.round(windowHeight * 0.55) - headerApprox - sheetVerticalPadding - bottomReserve),
+  );
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose} />
-      <View style={styles.modalSheet}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>{title}</Text>
-          <Pressable onPress={onClose} style={styles.modalCloseBtn}>
-            <MaterialCommunityIcons name="close" size={20} color="#6b7280" />
-          </Pressable>
-        </View>
-        <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
-          {items.map((it) => (
-            <Pressable
-              key={it.key}
-              onPress={it.onPress}
-              style={({ pressed }) => [styles.modalItem, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.modalItemText}>{it.label}</Text>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+      statusBarTranslucent
+      presentationStyle="overFullScreen"
+    >
+      <View style={styles.selectModalRoot}>
+        <Pressable style={styles.modalBackdropFill} onPress={onClose} accessibilityLabel="Dismiss" />
+        <View
+          style={[
+            styles.modalSheet,
+            {
+              paddingBottom: bottomReserve,
+              maxHeight: Math.round(windowHeight * 0.92),
+            },
+          ]}
+        >
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{title}</Text>
+            <Pressable onPress={onClose} style={styles.modalCloseBtn}>
+              <MaterialCommunityIcons name="close" size={20} color="#6b7280" />
             </Pressable>
-          ))}
-        </ScrollView>
+          </View>
+          <ScrollView
+            style={{ maxHeight: maxListHeight }}
+            contentContainerStyle={styles.selectModalListContent}
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {items.map((it) => (
+              <Pressable
+                key={it.key}
+                onPress={it.onPress}
+                style={({ pressed }) => [styles.modalItem, pressed && styles.modalItemPressed]}
+              >
+                <Text style={styles.modalItemText}>{it.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -1640,27 +1776,42 @@ const styles = StyleSheet.create({
   navBtnTextOutline: { color: '#054653' },
 
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
+  /** Full-screen wrapper so the sheet sits above status/gesture areas consistently. */
+  selectModalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  modalBackdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)' },
   modalSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#e5e7eb',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingTop: 12,
+    zIndex: 2,
+    elevation: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+  },
+  selectModalListContent: {
+    paddingBottom: 8,
+    flexGrow: 0,
   },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   modalTitle: { color: '#054653', fontSize: 14, fontWeight: '900' },
   modalCloseBtn: { padding: 8 },
   modalItem: {
-    paddingVertical: 12,
-    borderTopWidth: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#f3f4f6',
   },
+  modalItemPressed: { backgroundColor: '#f3f4f6' },
   modalItemText: { color: '#111827', fontSize: 13, fontWeight: '700' },
 
   iosDoneBtn: {
@@ -1734,6 +1885,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#054653',
   },
   submittedBtnTextPrimary: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
+  submittedBtnGradient: { backgroundColor: 'transparent', overflow: 'hidden' },
+  submittedBtnGradientInner: {
+    width: '100%',
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   submittedBtnOutline: {
     backgroundColor: '#ffffff',
     borderWidth: 1,

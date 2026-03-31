@@ -6,21 +6,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useHrAuth } from '@/context/HrAuthContext';
 
-type TabKey = 'home' | 'travel' | 'requests' | 'approvals' | 'staff';
+type TabKey = 'home' | 'travel' | 'requests' | 'departments' | 'staff';
 
 export function HrBottomNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { user } = useHrAuth();
-
-  const canApprove = user?.systemRole === 'Senior Manager' || user?.systemRole === 'Supervisor';
+  const isSeniorManager = String(user?.systemRole || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .includes('senior manager');
 
   const currentTab: TabKey =
     pathname.startsWith('/hr/home') ? 'home'
     : pathname.startsWith('/hr/travel') ? 'travel'
     : pathname.startsWith('/hr/requests') ? 'requests'
-    : pathname.startsWith('/hr/approvals') ? 'approvals'
+    : pathname.startsWith('/hr/departments') ? 'departments'
     : pathname.startsWith('/hr/staff-directory') ? 'staff'
     : 'home';
 
@@ -50,20 +53,20 @@ export function HrBottomNav() {
             active={currentTab === 'travel'}
             onPress={() => goTo('travel', '/hr/travel')}
           />
-          {canApprove && (
-            <NavItem
-              label="Approvals"
-              icon="check-decagram-outline"
-              active={currentTab === 'approvals'}
-              onPress={() => goTo('approvals', '/hr/approvals')}
-            />
-          )}
           <NavItem
             label="Requests"
             icon="file-document-outline"
             active={currentTab === 'requests'}
             onPress={() => goTo('requests', '/hr/requests')}
           />
+          {isSeniorManager ? (
+            <NavItem
+              label="Depts"
+              icon="domain"
+              active={currentTab === 'departments'}
+              onPress={() => goTo('departments', '/hr/departments')}
+            />
+          ) : null}
           <NavItem
             label="Staff"
             icon="account-group-outline"

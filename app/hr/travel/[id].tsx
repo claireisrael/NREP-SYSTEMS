@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -18,6 +18,11 @@ export default function HrTravelRequestDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [doc, setDoc] = useState<any>(null);
   const [attachments, setAttachments] = useState<any[]>([]);
+  const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [actionStage, setActionStage] = useState<'l1' | 'l2' | null>(null);
+  const [actionComments, setActionComments] = useState('');
+  const [acting, setActing] = useState(false);
 
   const canEdit = useMemo(() => {
     const status = String(doc?.status || '').toLowerCase();
@@ -33,6 +38,119 @@ export default function HrTravelRequestDetailScreen() {
       attachments: safeJsonParseArray(doc.attachments),
     };
   }, [doc]);
+
+  const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
+    (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
+    '') as string;
+  const isFinanceUser = !!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId;
+
+  const canAct = useMemo(() => {
+    if (!parsed || !user?.$id) return { l1: false, l2: false, finance: false };
+    const myId = String(user.$id);
+    const requesterId = String(parsed.userId || '');
+    if (requesterId && requesterId === myId) return { l1: false, l2: false };
+    const status = String(parsed.status || '').toLowerCase();
+    return {
+      l1: String(parsed.l1ApproverId || '') === myId && status === 'pending',
+      l2: String(parsed.l2ApproverId || '') === myId && status === 'l1_approved',
+      finance: isFinanceUser && ['pending_finance', 'l2_approved'].includes(status),
+    };
+  }, [parsed, user?.$id, isFinanceUser]);
+
+  const resolveActiveL2ApproverId = useCallback(async () => {
+    const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS, [
+      Query.equal('level', 'L2'),
+      Query.equal('isActive', true),
+      Query.limit(1),
+    ]);
+    const d = (res as any)?.documents?.[0];
+    const uid = String(d?.userId || '').trim();
+    if (!uid) throw new Error('No active L2 approver is configured.');
+    return uid;
+  }, []);
+
+  const openApprove = (stage: 'l1' | 'l2' | 'finance') => {
+    if (stage === 'l1' && !canAct.l1) return;
+    if (stage === 'l2' && !canAct.l2) return;
+    if (stage === 'finance' && !canAct.finance) return;
+    setActionStage(stage);
+    setActionComments('');
+    setApproveModalOpen(true);
+  };
+
+  const openReject = (stage: 'l1' | 'l2' | 'finance') => {
+    if (stage === 'l1' && !canAct.l1) return;
+    if (stage === 'l2' && !canAct.l2) return;
+    if (stage === 'finance' && !canAct.finance) return;
+    setActionStage(stage);
+    setActionComments('');
+    setRejectModalOpen(true);
+  };
+
+  const closeActionModals = () => {
+    if (acting) return;
+    setApproveModalOpen(false);
+    setRejectModalOpen(false);
+    setActionStage(null);
+    setActionComments('');
+  };
+
+  const confirmApprove = useCallback(async () => {
+    if (!parsed?.$id || !actionStage) return;
+    setActing(true);
+    try {
+      const now = new Date().toISOString();
+      const update: any = {};
+      if (actionStage === 'l1') {
+        const l2Id = await resolveActiveL2ApproverId();
+        update.status = 'l1_approved';
+        update.l1ApprovalDate = now;
+        update.l1Comments = actionComments.trim() || null;
+        update.l2ApproverId = l2Id;
+      } else if (actionStage === 'l2') {
+        update.status = 'pending_finance';
+        update.l2ApprovalDate = now;
+        update.l2Comments = actionComments.trim() || null;
+      } else {
+        update.status = 'completed';
+        update.completedDate = now;
+        update.completionComments = actionComments.trim() || null;
+      }
+      await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, String(parsed.$id), update);
+      closeActionModals();
+      await load();
+    } catch (e: any) {
+      Alert.alert('Approve failed', e?.message || 'Unable to approve this request.');
+    } finally {
+      setActing(false);
+    }
+  }, [actionComments, actionStage, load, parsed?.$id, resolveActiveL2ApproverId]);
+
+  const confirmReject = useCallback(async () => {
+    if (!parsed?.$id || !actionStage || !user?.$id) return;
+    const reason = actionComments.trim();
+    if (!reason) {
+      Alert.alert('Validation', 'Please enter a rejection reason.');
+      return;
+    }
+    setActing(true);
+    try {
+      const now = new Date().toISOString();
+      const update: any = {
+        status: 'rejected',
+        rejectionReason: reason,
+        rejectedBy: String(user.$id),
+        rejectionDate: now,
+      };
+      await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, String(parsed.$id), update);
+      closeActionModals();
+      await load();
+    } catch (e: any) {
+      Alert.alert('Reject failed', e?.message || 'Unable to reject this request.');
+    } finally {
+      setActing(false);
+    }
+  }, [actionComments, actionStage, load, parsed?.$id, user?.$id]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -145,6 +263,27 @@ export default function HrTravelRequestDetailScreen() {
           </View>
         ) : parsed ? (
           <View style={{ gap: 12 }}>
+            {(canAct.l1 || canAct.l2 || canAct.finance) ? (
+              <View style={styles.actionCard}>
+                <Text style={styles.actionTitle}>
+                  {canAct.l1 ? 'Level 1 approval' : canAct.l2 ? 'Level 2 approval' : 'Finance completion'}
+                </Text>
+                <View style={styles.actionRow}>
+                  <Pressable
+                    style={styles.actionIconBtn}
+                    onPress={() => openApprove(canAct.l1 ? 'l1' : canAct.l2 ? 'l2' : 'finance')}
+                  >
+                    <MaterialCommunityIcons name="check" size={18} color="#047857" />
+                  </Pressable>
+                  <Pressable
+                    style={styles.actionIconBtn}
+                    onPress={() => openReject(canAct.l1 ? 'l1' : canAct.l2 ? 'l2' : 'finance')}
+                  >
+                    <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
             <View style={styles.card}>
               <Row label="Status" value={statusLabel(parsed.status)} />
               <Row
@@ -289,6 +428,60 @@ export default function HrTravelRequestDetailScreen() {
         ) : null}
       </ScrollView>
       <HrBottomNav />
+
+      <Modal visible={approveModalOpen} transparent animationType="fade" onRequestClose={closeActionModals}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeActionModals} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Approve</Text>
+            <Text style={styles.modalSub}>
+              {actionStage === 'l1' ? 'Approves L1 and forwards to L2.' : 'Approves L2 and forwards to finance.'}
+            </Text>
+            <TextInput
+              value={actionComments}
+              onChangeText={setActionComments}
+              placeholder="Comments (optional)"
+              placeholderTextColor="#9ca3af"
+              style={styles.modalInput}
+              multiline
+            />
+            <View style={styles.modalActions}>
+              <Pressable onPress={closeActionModals} style={[styles.modalBtn, styles.modalBtnOutline]} disabled={acting}>
+                <Text style={styles.modalBtnTextOutline}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={confirmApprove} style={[styles.modalBtn, styles.modalBtnApprove]} disabled={acting}>
+                <Text style={styles.modalBtnTextApprove}>{acting ? 'Working…' : 'Approve'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={rejectModalOpen} transparent animationType="fade" onRequestClose={closeActionModals}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeActionModals} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Reject</Text>
+            <Text style={styles.modalSub}>Adds a rejection reason and returns to requester.</Text>
+            <TextInput
+              value={actionComments}
+              onChangeText={setActionComments}
+              placeholder="Rejection reason *"
+              placeholderTextColor="#9ca3af"
+              style={styles.modalInput}
+              multiline
+            />
+            <View style={styles.modalActions}>
+              <Pressable onPress={closeActionModals} style={[styles.modalBtn, styles.modalBtnOutline]} disabled={acting}>
+                <Text style={styles.modalBtnTextOutline}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={confirmReject} style={[styles.modalBtn, styles.modalBtnReject]} disabled={acting}>
+                <Text style={styles.modalBtnTextReject}>{acting ? 'Working…' : 'Reject'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -384,7 +577,7 @@ function statusLabel(status: any) {
   const s = String(status || '').toLowerCase();
   if (s === 'pending') return 'Pending L1 Approval';
   if (s === 'l1_approved') return 'Pending L2 Approval';
-  if (s === 'l2_approved') return 'Approved - Ready for Finance';
+  if (s === 'pending_finance' || s === 'l2_approved') return 'Pending Finance';
   if (s === 'rejected') return 'Rejected';
   if (s === 'completed') return 'Completed';
   return status ? String(status) : '—';
@@ -393,7 +586,7 @@ function statusLabel(status: any) {
 function statusPillStyle(status: any) {
   const s = String(status || '').toLowerCase();
   if (s === 'rejected') return { pill: { backgroundColor: '#fef2f2' }, text: { color: '#b91c1c' } };
-  if (s === 'l2_approved') return { pill: { backgroundColor: '#ecfdf5' }, text: { color: '#047857' } };
+  if (s === 'pending_finance' || s === 'l2_approved') return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
   if (s === 'l1_approved') return { pill: { backgroundColor: '#eff6ff' }, text: { color: '#1d4ed8' } };
   if (s === 'completed') return { pill: { backgroundColor: '#f5f3ff' }, text: { color: '#5b21b6' } };
   return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
@@ -437,6 +630,67 @@ const styles = StyleSheet.create({
   headerKicker: { color: '#6b7280', fontSize: 11, fontWeight: '800' },
   headerTitle: { color: '#054653', fontSize: 18, fontWeight: '900', marginTop: 2 },
   headerSub: { marginTop: 4, color: '#6b7280', fontSize: 12, fontWeight: '600' },
+  actionCard: {
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  actionTitle: { color: '#054653', fontSize: 13, fontWeight: '900' },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  actionIconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  modalTitle: { color: '#0f172a', fontSize: 16, fontWeight: '900', textAlign: 'center' },
+  modalSub: { marginTop: 6, color: '#6b7280', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  modalInput: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 44,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlignVertical: 'top',
+  },
+  modalActions: { marginTop: 14, flexDirection: 'row', gap: 10 },
+  modalBtn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  modalBtnOutline: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e7eb' },
+  modalBtnApprove: { backgroundColor: '#047857' },
+  modalBtnReject: { backgroundColor: '#b91c1c' },
+  modalBtnTextOutline: { color: '#054653', fontSize: 12, fontWeight: '900' },
+  modalBtnTextApprove: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
+  modalBtnTextReject: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
   headerMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   statusPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   statusPillText: { fontSize: 11, fontWeight: '900' },

@@ -77,6 +77,12 @@ export const HR_COLLECTIONS = {
 
 export const HR_PROJECTS_COLLECTIONS = {
   PROJECTS: '66c1c53a000f8ef8ac71',
-} as const;export const HR_BUCKETS = {
+} as const;
+
+export const HR_BUCKETS = {
   TRAVEL_ATTACHMENTS: '67e0415e002bfc51380a',
+  GENERAL_REQUEST_ATTACHMENTS:
+    (process.env as any)?.EXPO_PUBLIC_GENERAL_REQUEST_ATTACHMENTS_BUCKET_ID ||
+    (process.env as any)?.NEXT_PUBLIC_GENERAL_REQUEST_ATTACHMENTS_BUCKET_ID ||
+    '',
 } as const;

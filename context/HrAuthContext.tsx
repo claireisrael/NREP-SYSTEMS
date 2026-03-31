@@ -21,7 +21,7 @@ type HrAuthContextValue = {
   loginAttempts: number;
   getRemainingLockoutTime: () => number;
   refreshProfile: () => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -31,9 +31,18 @@ const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 10;
 const PROFILE_CACHE_VERSION = 1;
 const PROFILE_LOAD_TIMEOUT_MS = 8000;
+// If "Remember me" is OFF, expire mobile session after this window to match web-like behavior.
+// (Web sessions typically expire on browser close or shorter TTL; mobile otherwise can feel "forever".)
+const NON_REMEMBER_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 type HrAuthProviderProps = {
   children: ReactNode;
+};
+
+type HrAuthMeta = {
+  version: 1;
+  rememberMe: boolean;
+  loginAt: number; // epoch ms
 };
 
 export function HrAuthProvider({ children }: HrAuthProviderProps) {
@@ -45,6 +54,11 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
   const profileCachePath = useMemo(() => {
     const base = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
     return `${base}hr_profile_cache_v${PROFILE_CACHE_VERSION}.json`;
+  }, []);
+
+  const authMetaPath = useMemo(() => {
+    const base = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
+    return `${base}hr_auth_meta_v1.json`;
   }, []);
 
   const readCachedProfile = async (): Promise<HrUserProfile> => {
@@ -78,6 +92,38 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     }
   };
 
+  const readAuthMeta = async (): Promise<HrAuthMeta | null> => {
+    try {
+      const info = await FileSystem.getInfoAsync(authMetaPath);
+      if (!info.exists) return null;
+      const raw = await FileSystem.readAsStringAsync(authMetaPath);
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      if (parsed.version !== 1) return null;
+      if (typeof parsed.rememberMe !== 'boolean') return null;
+      if (typeof parsed.loginAt !== 'number') return null;
+      return parsed as HrAuthMeta;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeAuthMeta = async (meta: HrAuthMeta) => {
+    try {
+      await FileSystem.writeAsStringAsync(authMetaPath, JSON.stringify(meta));
+    } catch {
+      // ignore
+    }
+  };
+
+  const clearAuthMeta = async () => {
+    try {
+      await FileSystem.deleteAsync(authMetaPath, { idempotent: true });
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -87,8 +133,49 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
         const cached = await readCachedProfile();
         if (isMounted && cached) setUser(cached);
 
+        // Enforce web-like expiry when "Remember me" is OFF.
+        const meta = await readAuthMeta();
+        if (meta && !meta.rememberMe) {
+          const age = Date.now() - meta.loginAt;
+          if (age > NON_REMEMBER_MAX_AGE_MS) {
+            try {
+              await hrAccount.deleteSession('current');
+            } catch {
+              // ignore
+            }
+            await clearCachedProfile();
+            await clearAuthMeta();
+            if (isMounted) setUser(null);
+            return;
+          }
+        }
+
+        // If Appwrite session itself is expired/invalid, account.get() will throw.
         const session = await hrAccount.get();
         if (!isMounted) return;
+
+        // Best-effort: if SDK supports session expiry, validate it.
+        try {
+          // @ts-ignore - not all SDK typings include getSession
+          const currentSession = await (hrAccount as any).getSession?.('current');
+          const expiresAt = currentSession?.expire || currentSession?.expiresAt || null;
+          if (expiresAt) {
+            const expMs = new Date(String(expiresAt)).getTime();
+            if (Number.isFinite(expMs) && expMs > 0 && expMs <= Date.now()) {
+              try {
+                await hrAccount.deleteSession('current');
+              } catch {
+                // ignore
+              }
+              await clearCachedProfile();
+              await clearAuthMeta();
+              if (isMounted) setUser(null);
+              return;
+            }
+          }
+        } catch {
+          // ignore session-expiry probing
+        }
 
         const profile = await withTimeout(
           loadUserProfile(session.$id, session.email),
@@ -183,18 +270,15 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const loginWithRemember = async (email: string, password: string, rememberMeFlag?: boolean) => {
+    const remember = !!rememberMeFlag;
     if (lockedUntil && lockedUntil.getTime() > Date.now()) {
       throw new Error(
         `Account is locked due to too many failed attempts. Try again in ${getRemainingLockoutTime()} minutes.`,
       );
     }
-
     setIsLoading(true);
-
     try {
-      // createEmailPasswordSession returns a Session ($id is session id),
-      // so we must call account.get() to obtain the authenticated user id.
       await hrAccount.createEmailPasswordSession(email, password);
       const currentUser = await hrAccount.get();
       const profile = await withTimeout(
@@ -203,6 +287,7 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
       );
       setUser(profile);
       writeCachedProfile(profile);
+      await writeAuthMeta({ version: 1, rememberMe: remember, loginAt: Date.now() });
       setLoginAttempts(0);
       setLockedUntil(null);
     } catch (err: any) {
@@ -221,13 +306,18 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
   };
 
   const logout = async () => {
+    // Make logout immediate and deterministic for the UI:
+    // clear local user state first so screens stop rendering/probing authenticated data.
+    setUser(null);
+    clearCachedProfile();
+    clearAuthMeta();
+
+    // Best-effort server session cleanup. This can fail if already expired.
     try {
       await hrAccount.deleteSession('current');
     } catch {
       // ignore
     }
-    setUser(null);
-    clearCachedProfile();
   };
 
   const isLocked = lockedUntil !== null && lockedUntil.getTime() > Date.now();
@@ -239,7 +329,7 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     loginAttempts,
     getRemainingLockoutTime,
     refreshProfile,
-    login,
+    login: loginWithRemember,
     logout,
   };
 
