@@ -196,8 +196,6 @@ export default function HrTravelScreen() {
     });
   }, [myRequests, search, statusFilter]);
 
-  if (isLoading || !user) return null;
-
   const openDeleteModal = (doc: any) => {
     setDeleteTarget(doc);
     setDeleteModalOpen(true);
@@ -355,6 +353,8 @@ export default function HrTravelScreen() {
       setRejecting(false);
     }
   };
+
+  if (isLoading || !user) return null;
 
   return (
     <ThemedView style={styles.container}>
