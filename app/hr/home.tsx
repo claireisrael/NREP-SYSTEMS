@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  InteractionManager,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -51,8 +52,20 @@ function getFirstName(name?: string | null, email?: string | null) {
   return 'User';
 }
 
+function isUnauthorizedAppwriteError(err: unknown): boolean {
+  const code = (err as any)?.code;
+  if (code === 401) return true;
+  const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
+  return (
+    msg.includes('unauthorized') ||
+    msg.includes('not authorized') ||
+    msg.includes('current user is not allowed') ||
+    msg.includes('401')
+  );
+}
+
 export default function HrHomeScreen() {
-  const { user, isLoading, refreshProfile, logout } = useHrAuth();
+  const { user, isLoading, isLoggingOut, refreshProfile, logout } = useHrAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const greeting = getGreeting();
@@ -70,43 +83,59 @@ export default function HrHomeScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const signingOutRef = useRef(false);
   const loadSeqRef = useRef(0);
+  const logoutRef = useRef(logout);
+  const routerRef = useRef(router);
+  const lastFocusProfileRefreshRef = useRef(0);
 
   useEffect(() => {
     signingOutRef.current = signingOut;
   }, [signingOut]);
 
   useEffect(() => {
-    if (!isLoading && !user && !signingOut) {
-      // When there is no HR user, always go back to the HR entry/login screen.
+    logoutRef.current = logout;
+    routerRef.current = router;
+  }, [logout, router]);
+
+  useEffect(() => {
+    if (!isLoading && !user) {
       router.replace('/hr');
     }
-  }, [isLoading, user, signingOut, router]);
+  }, [isLoading, user, router]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!user || signingOut) return;
-      refreshProfile();
-    }, [refreshProfile, user, signingOut])
+      if (!user || signingOut || isLoggingOut) return;
+      // Avoid hammering Appwrite on every tab focus; keeps dashboard counts steady.
+      const now = Date.now();
+      if (now - lastFocusProfileRefreshRef.current < 8000) return;
+      lastFocusProfileRefreshRef.current = now;
+      void refreshProfile();
+    }, [refreshProfile, user, signingOut, isLoggingOut])
   );
 
   const handleLogout = useCallback(async () => {
-    if (signingOut) return;
+    if (signingOut || isLoggingOut) return;
     setSigningOut(true);
-    // Leave the dashboard immediately to avoid any post-logout API calls painting errors.
-    router.replace('/hr');
+    signingOutRef.current = true;
     try {
+      // Clear session and local state first; then navigate so nothing hits Appwrite with a half-dead session.
       await logout();
+      router.replace('/hr');
     } catch {
-      // Even if logout fails, we still want to leave the HR area.
+      router.replace('/hr');
     } finally {
-      setSigningOut(false);
+      // Clear overlay after navigation has committed — avoids dashboard ↔ login flicker.
+      InteractionManager.runAfterInteractions(() => {
+        signingOutRef.current = false;
+        setSigningOut(false);
+      });
     }
-  }, [logout, router, signingOut]);
+  }, [logout, router, signingOut, isLoggingOut]);
 
   const loadDashboardBits = useCallback(async () => {
       const seq = ++loadSeqRef.current;
       const userId = user?.$id;
-      if (!userId || signingOutRef.current) return;
+      if (!userId || signingOutRef.current || isLoggingOut) return;
       try {
         setCountsLoading(true);
         setCountsError(null);
@@ -150,15 +179,22 @@ export default function HrHomeScreen() {
           requests: (requestsRecent as any).documents ?? [],
         });
       } catch (e) {
-        // If logout happens mid-flight, Appwrite may return "not authorized". Ignore in that case.
-        if (!signingOutRef.current) {
-          console.error('Failed to load HR dashboard counts', e);
-          setCountsError((e as any)?.message || 'Failed to load counts');
+        if (signingOutRef.current) return;
+        if (isUnauthorizedAppwriteError(e)) {
+          try {
+            await logoutRef.current();
+          } catch {
+            // ignore
+          }
+          routerRef.current.replace('/hr');
+          return;
         }
+        console.error('Failed to load HR dashboard counts', e);
+        setCountsError((e as any)?.message || 'Failed to load counts');
       } finally {
         if (!signingOutRef.current && loadSeqRef.current === seq) setCountsLoading(false);
       }
-  }, [user?.$id]);
+  }, [user?.$id, isLoggingOut]);
 
   useEffect(() => {
     loadDashboardBits();
@@ -174,6 +210,18 @@ export default function HrHomeScreen() {
     return (
       <ThemedView style={styles.loadingContainer}>
         <HrLogoSpinner size={62} />
+      </ThemedView>
+    );
+  }
+
+  // Full-screen signing out (covers dashboard even if user is already cleared mid-request).
+  if (signingOut || isLoggingOut) {
+    return (
+      <ThemedView style={styles.loadingContainer}>
+        <HrLogoSpinner size={62} />
+        <ThemedText type="subtitle" style={styles.signingOutText}>
+          Signing out…
+        </ThemedText>
       </ThemedView>
     );
   }
@@ -392,6 +440,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+  },
+  signingOutText: {
+    marginTop: 16,
+    color: '#054653',
+    fontWeight: '700',
   },
   scrollContent: {
     paddingHorizontal: 20,

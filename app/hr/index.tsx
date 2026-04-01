@@ -21,7 +21,7 @@ import { HrLogoSpinner } from '@/components/HrLogoSpinner';
 
 export default function HrLoginScreen() {
   const router = useRouter();
-  const { user, isLoading, isLocked, getRemainingLockoutTime, login } = useHrAuth();
+  const { user, isLoading, isLoggingOut, isLocked, getRemainingLockoutTime, login } = useHrAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,10 +35,10 @@ export default function HrLoginScreen() {
   };
 
   useEffect(() => {
-    if (!isLoading && user) {
+    if (!isLoading && !isLoggingOut && user) {
       router.replace('/hr/home');
     }
-  }, [isLoading, user, router]);
+  }, [isLoading, isLoggingOut, user, router]);
 
   const handleSubmit = async () => {
     const trimmedEmail = email.trim().toLowerCase();
@@ -72,7 +72,7 @@ export default function HrLoginScreen() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || isLoggingOut) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={[styles.content, { justifyContent: 'center' }]}>

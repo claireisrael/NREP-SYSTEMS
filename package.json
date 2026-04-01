@@ -8,7 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "generate-adaptive-icon": "node ./scripts/generate-android-adaptive-foreground.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -47,6 +48,7 @@
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "sharp": "^0.34.5",
     "typescript": "~5.9.2"
   },
   "private": true

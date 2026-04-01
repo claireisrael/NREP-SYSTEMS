@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  ReactNode,
+} from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { HR_COLLECTIONS, HR_DB_ID, hrAccount, hrDatabases, Query } from '@/lib/appwrite';
@@ -17,6 +25,7 @@ type HrUserProfile = {
 type HrAuthContextValue = {
   user: HrUserProfile;
   isLoading: boolean;
+  isLoggingOut: boolean;
   isLocked: boolean;
   loginAttempts: number;
   getRemainingLockoutTime: () => number;
@@ -45,9 +54,24 @@ type HrAuthMeta = {
   loginAt: number; // epoch ms
 };
 
+function isUnauthorizedAppwriteError(err: unknown): boolean {
+  const code = (err as any)?.code;
+  if (code === 401) return true;
+  const type = String((err as any)?.type ?? '');
+  if (type.toLowerCase().includes('unauthorized')) return true;
+  const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
+  return (
+    msg.includes('unauthorized') ||
+    msg.includes('not authorized') ||
+    msg.includes('current user is not allowed') ||
+    msg.includes('401')
+  );
+}
+
 export function HrAuthProvider({ children }: HrAuthProviderProps) {
   const [user, setUser] = useState<HrUserProfile>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState<Date | null>(null);
 
@@ -124,6 +148,55 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     }
   };
 
+  const loadUserProfile = useCallback(async (authUserId: string, fallbackEmail?: string): Promise<HrUserProfile> => {
+    try {
+      const users = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
+        Query.equal('userId', authUserId),
+      ]);
+
+      if (!users.documents.length) {
+        return {
+          $id: authUserId,
+          email: fallbackEmail || '',
+        };
+      }
+
+      const userDoc: any = users.documents[0];
+
+      let departmentName: string | null = userDoc.departmentName ?? null;
+      if (!departmentName && userDoc.departmentId) {
+        try {
+          const departments = await hrDatabases.listDocuments(
+            HR_DB_ID,
+            HR_COLLECTIONS.DEPARTMENTS,
+            [Query.equal('$id', userDoc.departmentId)],
+          );
+          if (departments.documents.length) {
+            departmentName = (departments.documents[0] as any).name ?? null;
+          }
+        } catch {
+          departmentName = null;
+        }
+      }
+
+      return {
+        $id: authUserId,
+        email: userDoc.email || fallbackEmail || '',
+        name: userDoc.name,
+        staffCategory: userDoc.staffCategory,
+        systemRole: userDoc.systemRole,
+        departmentId: userDoc.departmentId ?? null,
+        departmentName,
+        profilePicture: userDoc.profilePicture ?? null,
+      };
+    } catch {
+      return {
+        $id: authUserId,
+        email: fallbackEmail || '',
+      };
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -198,65 +271,16 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [loadUserProfile]);
 
-  const loadUserProfile = async (authUserId: string, fallbackEmail?: string): Promise<HrUserProfile> => {
-    try {
-      const users = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
-        Query.equal('userId', authUserId),
-      ]);
-
-      if (!users.documents.length) {
-        return {
-          $id: authUserId,
-          email: fallbackEmail || '',
-        };
-      }
-
-      const userDoc: any = users.documents[0];
-
-      let departmentName: string | null = userDoc.departmentName ?? null;
-      if (!departmentName && userDoc.departmentId) {
-        try {
-          const departments = await hrDatabases.listDocuments(
-            HR_DB_ID,
-            HR_COLLECTIONS.DEPARTMENTS,
-            [Query.equal('$id', userDoc.departmentId)],
-          );
-          if (departments.documents.length) {
-            departmentName = (departments.documents[0] as any).name ?? null;
-          }
-        } catch {
-          departmentName = null;
-        }
-      }
-
-      return {
-        $id: authUserId,
-        email: userDoc.email || fallbackEmail || '',
-        name: userDoc.name,
-        staffCategory: userDoc.staffCategory,
-        systemRole: userDoc.systemRole,
-        departmentId: userDoc.departmentId ?? null,
-        departmentName,
-        profilePicture: userDoc.profilePicture ?? null,
-      };
-    } catch {
-      return {
-        $id: authUserId,
-        email: fallbackEmail || '',
-      };
-    }
-  };
-
-  const getRemainingLockoutTime = () => {
+  const getRemainingLockoutTime = useCallback(() => {
     if (!lockedUntil) return 0;
     const diffMs = lockedUntil.getTime() - Date.now();
     if (diffMs <= 0) return 0;
     return Math.ceil(diffMs / (60 * 1000));
-  };
+  }, [lockedUntil]);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     try {
       const currentUser = await hrAccount.get();
       const profile = await withTimeout(
@@ -265,73 +289,101 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
       );
       setUser(profile);
       writeCachedProfile(profile);
-    } catch {
-      // keep current user state on refresh failure
-    }
-  };
-
-  const loginWithRemember = async (email: string, password: string, rememberMeFlag?: boolean) => {
-    const remember = !!rememberMeFlag;
-    if (lockedUntil && lockedUntil.getTime() > Date.now()) {
-      throw new Error(
-        `Account is locked due to too many failed attempts. Try again in ${getRemainingLockoutTime()} minutes.`,
-      );
-    }
-    setIsLoading(true);
-    try {
-      await hrAccount.createEmailPasswordSession(email, password);
-      const currentUser = await hrAccount.get();
-      const profile = await withTimeout(
-        loadUserProfile(currentUser.$id, currentUser.email || email),
-        PROFILE_LOAD_TIMEOUT_MS,
-      );
-      setUser(profile);
-      writeCachedProfile(profile);
-      await writeAuthMeta({ version: 1, rememberMe: remember, loginAt: Date.now() });
-      setLoginAttempts(0);
-      setLockedUntil(null);
-    } catch (err: any) {
-      const nextAttempts = loginAttempts + 1;
-      setLoginAttempts(nextAttempts);
-
-      if (nextAttempts >= MAX_ATTEMPTS) {
-        const until = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000);
-        setLockedUntil(until);
+    } catch (err) {
+      // Session revoked, expired, or Appwrite rejected the call — do not keep a stale "logged-in" UI.
+      if (isUnauthorizedAppwriteError(err)) {
+        setUser(null);
+        await clearCachedProfile();
+        await clearAuthMeta();
+        return;
       }
-
-      throw err;
-    } finally {
-      setIsLoading(false);
+      // Transient network / timeout: keep current user so the screen does not flicker.
     }
-  };
+  }, [loadUserProfile]);
 
-  const logout = async () => {
-    // Make logout immediate and deterministic for the UI:
-    // clear local user state first so screens stop rendering/probing authenticated data.
-    setUser(null);
-    clearCachedProfile();
-    clearAuthMeta();
+  const loginWithRemember = useCallback(
+    async (email: string, password: string, rememberMeFlag?: boolean) => {
+      const remember = !!rememberMeFlag;
+      if (lockedUntil && lockedUntil.getTime() > Date.now()) {
+        throw new Error(
+          `Account is locked due to too many failed attempts. Try again in ${getRemainingLockoutTime()} minutes.`,
+        );
+      }
+      setIsLoading(true);
+      try {
+        await hrAccount.createEmailPasswordSession(email, password);
+        const currentUser = await hrAccount.get();
+        const profile = await withTimeout(
+          loadUserProfile(currentUser.$id, currentUser.email || email),
+          PROFILE_LOAD_TIMEOUT_MS,
+        );
+        setUser(profile);
+        writeCachedProfile(profile);
+        await writeAuthMeta({ version: 1, rememberMe: remember, loginAt: Date.now() });
+        setLoginAttempts(0);
+        setLockedUntil(null);
+      } catch (err: any) {
+        const nextAttempts = loginAttempts + 1;
+        setLoginAttempts(nextAttempts);
 
-    // Best-effort server session cleanup. This can fail if already expired.
+        if (nextAttempts >= MAX_ATTEMPTS) {
+          const until = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000);
+          setLockedUntil(until);
+        }
+
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [getRemainingLockoutTime, loadUserProfile, lockedUntil, loginAttempts],
+  );
+
+  const logout = useCallback(async () => {
+    setIsLoggingOut(true);
     try {
-      await hrAccount.deleteSession('current');
-    } catch {
-      // ignore
+      // Clear local auth first so no screen keeps firing authenticated Appwrite calls.
+      setUser(null);
+      await clearCachedProfile();
+      await clearAuthMeta();
+
+      // Best-effort server session cleanup (can fail if session already expired).
+      try {
+        await hrAccount.deleteSession('current');
+      } catch {
+        // ignore
+      }
+    } finally {
+      setIsLoggingOut(false);
     }
-  };
+  }, []);
 
   const isLocked = lockedUntil !== null && lockedUntil.getTime() > Date.now();
 
-  const value: HrAuthContextValue = {
-    user,
-    isLoading,
-    isLocked,
-    loginAttempts,
-    getRemainingLockoutTime,
-    refreshProfile,
-    login: loginWithRemember,
-    logout,
-  };
+  const value = useMemo<HrAuthContextValue>(
+    () => ({
+      user,
+      isLoading,
+      isLoggingOut,
+      isLocked,
+      loginAttempts,
+      getRemainingLockoutTime,
+      refreshProfile,
+      login: loginWithRemember,
+      logout,
+    }),
+    [
+      user,
+      isLoading,
+      isLoggingOut,
+      isLocked,
+      loginAttempts,
+      getRemainingLockoutTime,
+      refreshProfile,
+      loginWithRemember,
+      logout,
+    ],
+  );
 
   return <HrAuthContext.Provider value={value}>{children}</HrAuthContext.Provider>;
 }
