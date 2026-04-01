@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -21,6 +23,17 @@ import { useAuth } from '@/context/AuthContext';
 export default function PmsLoginScreen() {
   const router = useRouter();
   const { login } = useAuth();
+
+  // Hardware back: leave PMS entirely so we never pop into a stale post-logout stack.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        router.replace('/');
+        return true;
+      });
+      return () => sub.remove();
+    }, [router]),
+  );
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
