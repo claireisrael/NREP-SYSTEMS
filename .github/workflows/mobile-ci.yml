@@ -9,13 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: "Platform to build"
+        description: "Platform to build (Android only for now)"
         required: true
         default: "android"
         type: choice
         options:
           - android
-          - ios
 
 jobs:
   ci:
@@ -75,11 +74,5 @@ jobs:
         run: npx eas-cli whoami || echo "Using EXPO_TOKEN from secrets"
 
       - name: Run EAS build
-        run: |
-          PLATFORM="${{ github.event.inputs.platform }}"
-          if [ "$PLATFORM" = "android" ]; then
-            npx eas-cli build --platform android --profile preview --non-interactive
-          else
-            npx eas-cli build --platform ios --profile preview --non-interactive
-          fi
+        run: npx eas-cli build --platform android --profile preview --non-interactive
 

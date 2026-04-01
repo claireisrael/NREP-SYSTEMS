@@ -14,15 +14,13 @@ import {
   Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
-import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
 
 const PMS_WEB_BASE_URL = 'https://projects.nrep.ug';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const DateTimePicker = require('@react-native-community/datetimepicker').default;
 
 type Timesheet = {
   $id: string;
@@ -33,6 +31,7 @@ type Timesheet = {
 type Entry = {
   $id: string;
   projectId: string;
+  taskId?: string | null;
   workDate: string;
   title: string;
   hours: number;
@@ -95,7 +94,9 @@ export default function MyTimesheetsScreen() {
 
         // Load projects
         const projectsRes = await fetch(
-          `${PMS_WEB_BASE_URL}/api/projects?organizationId=${encodeURIComponent(organizationId)}`,
+          `${PMS_WEB_BASE_URL}/api/projects?organizationId=${encodeURIComponent(
+            organizationId,
+          )}&requesterId=${encodeURIComponent(accountId)}`,
         );
         const projectsData = await projectsRes.json();
         if (projectsRes.ok) {
@@ -110,6 +111,8 @@ export default function MyTimesheetsScreen() {
         const tsRes = await fetch(
           `${PMS_WEB_BASE_URL}/api/timesheets?accountId=${encodeURIComponent(
             accountId,
+          )}&requesterId=${encodeURIComponent(accountId)}&organizationId=${encodeURIComponent(
+            organizationId,
           )}&weekStart=${encodeURIComponent(weekStart)}`,
         );
         const tsData = await tsRes.json();
@@ -340,6 +343,7 @@ export default function MyTimesheetsScreen() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             accountId,
+            requesterId: accountId,
             organizationId,
             weekStart,
             entries: [payload],
@@ -357,6 +361,8 @@ export default function MyTimesheetsScreen() {
       const tsRes = await fetch(
         `${PMS_WEB_BASE_URL}/api/timesheets?accountId=${encodeURIComponent(
           accountId,
+        )}&requesterId=${encodeURIComponent(accountId)}&organizationId=${encodeURIComponent(
+          organizationId,
         )}&weekStart=${encodeURIComponent(weekStart)}`,
       );
       const tsData = await tsRes.json();
@@ -432,6 +438,8 @@ export default function MyTimesheetsScreen() {
         body: JSON.stringify({
           timesheetId: timesheet.$id,
           action: 'submit',
+          requesterId: accountId,
+          organizationId,
         }),
       });
 
@@ -444,35 +452,6 @@ export default function MyTimesheetsScreen() {
     } catch (err: any) {
       console.error('Failed to submit timesheet', err);
       Alert.alert('Error', err?.message || 'Failed to submit timesheet.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const unsubmitTimesheet = async () => {
-    if (!timesheet) return;
-
-    try {
-      setSubmitting(true);
-
-      const res = await fetch(`${PMS_WEB_BASE_URL}/api/timesheets`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timesheetId: timesheet.$id,
-          action: 'unsubmit',
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || 'Failed to unsubmit timesheet.');
-      }
-
-      setTimesheet((prev) => (prev ? { ...prev, status: 'draft' } : prev));
-    } catch (err: any) {
-      console.error('Failed to unsubmit timesheet', err);
-      Alert.alert('Error', err?.message || 'Failed to unsubmit timesheet.');
     } finally {
       setSubmitting(false);
     }
@@ -713,6 +692,52 @@ export default function MyTimesheetsScreen() {
                           ]}
                         >
                           {p.code || p.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+
+                <Text style={styles.fieldLabel}>Task (Optional)</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.projectPickerRow}
+                >
+                  <Pressable
+                    style={[
+                      styles.projectPickerChip,
+                      !entryTaskId && styles.projectPickerChipActive,
+                    ]}
+                    onPress={() => setEntryTaskId('')}
+                  >
+                    <Text
+                      style={[
+                        styles.projectPickerText,
+                        !entryTaskId && styles.projectPickerTextActive,
+                      ]}
+                    >
+                      None
+                    </Text>
+                  </Pressable>
+                  {tasks.map((t) => {
+                    const active = entryTaskId === t.$id;
+                    return (
+                      <Pressable
+                        key={t.$id}
+                        style={[
+                          styles.projectPickerChip,
+                          active && styles.projectPickerChipActive,
+                        ]}
+                        onPress={() => setEntryTaskId(t.$id)}
+                      >
+                        <Text
+                          style={[
+                            styles.projectPickerText,
+                            active && styles.projectPickerTextActive,
+                          ]}
+                        >
+                          {t.code || t.name}
                         </Text>
                       </Pressable>
                     );

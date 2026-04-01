@@ -12,7 +12,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { PMS_COLLECTIONS, PMS_DB_ID, pmsDatabases, Query } from '@/lib/appwrite';
@@ -42,7 +41,7 @@ const formatStatusLabel = (status?: string) => {
 };
 
 export default function PmsProjectsScreen() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -52,6 +51,15 @@ export default function PmsProjectsScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   useEffect(() => {
+    if (authLoading) return;
+
+    if (!user) {
+      setProjects([]);
+      setError('Please sign in to view projects.');
+      setLoading(false);
+      return;
+    }
+
     const load = async () => {
       try {
         setLoading(true);
@@ -88,7 +96,7 @@ export default function PmsProjectsScreen() {
     };
 
     load();
-  }, [user]);
+  }, [user, authLoading]);
 
   const filteredProjects = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -235,13 +243,21 @@ export default function PmsProjectsScreen() {
     <SafeAreaView style={styles.safeArea}>
       <ThemedView style={styles.container}>
         <View>
-          <View style={styles.headerRow}>
-            <ThemedText type="title" style={styles.headerTitle}>
-              Projects
-            </ThemedText>
-            <ThemedText type="default" style={styles.headerSubtitle}>
-              Browse all projects you can access.
-            </ThemedText>
+          <View style={styles.headerCard}>
+            <View style={styles.headerTopRow}>
+              <View style={styles.headerIconWrap}>
+                <MaterialCommunityIcons name="folder-multiple-outline" size={20} color="#054653" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>Projects</Text>
+                <Text style={styles.headerSubtitle}>
+                  Browse all projects you can access.
+                </Text>
+              </View>
+              <View style={styles.headerCountPill}>
+                <Text style={styles.headerCountText}>{filteredProjects.length}</Text>
+              </View>
+            </View>
           </View>
 
           <View style={styles.searchCard}>
@@ -329,27 +345,71 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     justifyContent: 'space-between',
   },
-  headerRow: {
+  headerCard: {
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: '#e6f4f2',
+    borderWidth: 1,
+    borderColor: '#bfe7e1',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#054653',
   },
   headerSubtitle: {
     marginTop: 4,
-    fontSize: 13,
+    fontSize: 12,
     color: '#6b7280',
+    fontWeight: '600',
+  },
+  headerCountPill: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#054653',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  headerCountText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
   },
   searchCard: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
     marginBottom: 8,
-    borderRadius: 999,
-    backgroundColor: '#f3f4f6',
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   searchInput: {
     flex: 1,
@@ -361,6 +421,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginBottom: 8,
+    flexWrap: 'wrap',
   },
   filterChip: {
     paddingHorizontal: 12,
@@ -370,16 +431,17 @@ const styles = StyleSheet.create({
     borderColor: '#d1d5db',
   },
   filterChipActive: {
-    backgroundColor: '#0f766e',
-    borderColor: '#0f766e',
+    backgroundColor: '#054653',
+    borderColor: '#054653',
   },
   filterChipLabel: {
     fontSize: 12,
     color: '#374151',
+    fontWeight: '700',
   },
   filterChipLabelActive: {
     color: '#ffffff',
-    fontWeight: '600',
+    fontWeight: '900',
   },
   loadingBox: {
     flexDirection: 'row',

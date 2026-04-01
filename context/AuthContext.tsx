@@ -135,7 +135,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    loadUser();
+    // Prevent any unexpected unhandled promise rejections from bubbling to the runtime.
+    loadUser().catch(() => {
+      setUser(null);
+      setLoading(false);
+    });
   }, [loadUser]);
 
   const login = useCallback(

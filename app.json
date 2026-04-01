@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/images/nrep-logo.png"
+        "foregroundImage": "./assets/images/nrep-android-adaptive-foreground.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -33,7 +33,7 @@
           "image": "./assets/images/nrep-logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#14B8A6"
+          "backgroundColor": "#FFFFFF"
         }
       ],
       "@react-native-community/datetimepicker"

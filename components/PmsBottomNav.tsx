@@ -25,7 +25,7 @@ export function PmsBottomNav() {
 
   const goTo = (tab: TabKey, route: string) => {
     if (currentTab === tab) return;
-    router.replace(route);
+    router.replace(route as any);
   };
 
   return (
@@ -94,7 +94,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     paddingTop: 4,
-    backgroundColor: 'transparent',
+    backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
   },
   container: {
     flexDirection: 'row',
@@ -103,7 +105,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: '#ffffff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.08,
