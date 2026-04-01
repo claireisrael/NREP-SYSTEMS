@@ -116,12 +116,15 @@ export default function PmsProjectDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
+  const PAGE_SIZE = 10;
+
   const isAdmin = !!user?.isAdmin;
   const isSupervisor = !!user?.isSupervisor && !user?.isAdmin;
   const canCreateTask = isAdmin || isSupervisor;
 
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksPage, setTasksPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -135,6 +138,7 @@ export default function PmsProjectDetailScreen() {
   const [teamRoleFilter, setTeamRoleFilter] = useState<
     'all' | 'manager' | 'lead' | 'developer' | 'designer' | 'qa' | 'member'
   >('all');
+  const [teamPage, setTeamPage] = useState(0);
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
@@ -172,6 +176,9 @@ export default function PmsProjectDetailScreen() {
   const [staffSearch, setStaffSearch] = useState('');
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [selectedMemberRoles, setSelectedMemberRoles] = useState<string[]>(['member']);
+  const [removeMemberOpen, setRemoveMemberOpen] = useState(false);
+  const [removeMemberTarget, setRemoveMemberTarget] = useState<TeamMember | null>(null);
+  const [removeMemberBusy, setRemoveMemberBusy] = useState(false);
   const [showMilestonePicker, setShowMilestonePicker] = useState(false);
   const [activeDatePicker, setActiveDatePicker] = useState<
     'start' | 'due' | 'milestoneStart' | 'milestoneDue' | null
@@ -234,6 +241,7 @@ export default function PmsProjectDetailScreen() {
         }));
 
         setTasks(mappedTasks);
+        setTasksPage(0);
       } catch (err: any) {
         console.error('Failed to load project detail', err);
         setError(err?.message || 'Failed to load project.');
@@ -253,9 +261,19 @@ export default function PmsProjectDetailScreen() {
       setTeamLoading(true);
       setTeamError(null);
 
-      const res = await fetch(
-        `${PMS_WEB_BASE_URL}/api/projects/${encodeURIComponent(String(id))}/members`,
-      );
+      if (!user?.authUser?.$id) {
+        throw new Error('Unable to load team: requesterId is missing.');
+      }
+      if (!user?.organizationId) {
+        throw new Error('Unable to load team: organizationId is missing.');
+      }
+
+      const url =
+        `${PMS_WEB_BASE_URL}/api/projects/${encodeURIComponent(String(id))}/members` +
+        `?requesterId=${encodeURIComponent(user.authUser.$id)}` +
+        `&organizationId=${encodeURIComponent(user.organizationId)}`;
+
+      const res = await fetch(url);
       const data = await res.json();
 
       if (!res.ok) {
@@ -263,18 +281,23 @@ export default function PmsProjectDetailScreen() {
       }
 
       setTeam((data.members || []) as TeamMember[]);
+      setTeamPage(0);
     } catch (err: any) {
       console.error('Failed to load project team', err);
       setTeamError(err?.message || 'Failed to load project team.');
     } finally {
       setTeamLoading(false);
     }
-  }, [id]);
+  }, [id, user?.authUser?.$id, user?.organizationId]);
 
   // Load team members using the same API + origin as the web app
   useEffect(() => {
     loadTeam();
   }, [loadTeam]);
+
+  useEffect(() => {
+    setTeamPage(0);
+  }, [teamSearch, teamRoleFilter]);
 
   const filteredTeam = useMemo(() => {
     const term = teamSearch.trim().toLowerCase();
@@ -300,6 +323,15 @@ export default function PmsProjectDetailScreen() {
     });
   }, [team, teamSearch, teamRoleFilter]);
 
+  const pagedTeam = useMemo(() => {
+    const take = (teamPage + 1) * PAGE_SIZE;
+    return filteredTeam.slice(0, take);
+  }, [filteredTeam, teamPage]);
+
+  const hasMoreTeam = useMemo(() => {
+    return pagedTeam.length < filteredTeam.length;
+  }, [pagedTeam.length, filteredTeam.length]);
+
   const teamRoleStats = useMemo(
     () => ({
       total: team.length,
@@ -316,53 +348,52 @@ export default function PmsProjectDetailScreen() {
     if (!member.membershipId || !user?.authUser?.$id || !user.organizationId) {
       return;
     }
+    setRemoveMemberTarget(member);
+    setRemoveMemberOpen(true);
+  };
 
-    const fullName = `${member.firstName} ${member.lastName}`.trim() || member.username;
+  const closeRemoveMember = () => {
+    if (removeMemberBusy) return;
+    setRemoveMemberOpen(false);
+    setRemoveMemberTarget(null);
+  };
 
-    Alert.alert(
-      'Remove from Project',
-      `Are you sure you want to remove ${fullName} from this project?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const url = `${PMS_WEB_BASE_URL}/api/projects/${encodeURIComponent(
-                String(id),
-              )}/members?membershipId=${encodeURIComponent(
-                member.membershipId!,
-              )}&requesterId=${encodeURIComponent(
-                user.authUser.$id,
-              )}&organizationId=${encodeURIComponent(user.organizationId)}`;
+  const confirmRemoveMember = async () => {
+    if (!removeMemberTarget?.membershipId || !user?.authUser?.$id || !user?.organizationId || !id) return;
+    try {
+      setRemoveMemberBusy(true);
+      const url =
+        `${PMS_WEB_BASE_URL}/api/projects/${encodeURIComponent(String(id))}/members` +
+        `?membershipId=${encodeURIComponent(removeMemberTarget.membershipId)}` +
+        `&requesterId=${encodeURIComponent(user.authUser.$id)}` +
+        `&organizationId=${encodeURIComponent(user.organizationId)}`;
 
-              const res = await fetch(url, { method: 'DELETE' });
-              const data = await res.json();
+      const res = await fetch(url, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to remove member from project.');
+      }
 
-              if (!res.ok) {
-                throw new Error(data?.error || 'Failed to remove member from project.');
-              }
-
-              setTeam((prev) => prev.filter((m) => m.membershipId !== member.membershipId));
-            } catch (err: any) {
-              Alert.alert('Error', err?.message || 'Failed to remove member from project.');
-            }
-          },
-        },
-      ],
-    );
+      setTeam((prev) => prev.filter((m) => m.membershipId !== removeMemberTarget.membershipId));
+      closeRemoveMember();
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to remove member from project.');
+    } finally {
+      setRemoveMemberBusy(false);
+    }
   };
 
   const loadAvailableStaff = useCallback(async () => {
-    if (!user?.organizationId) return;
+    if (!user?.organizationId || !user?.authUser?.$id) return;
 
     try {
       setAvailableStaffLoading(true);
       setAvailableStaffError(null);
 
       const res = await fetch(
-        `${PMS_WEB_BASE_URL}/api/staff?organizationId=${encodeURIComponent(user.organizationId)}`,
+        `${PMS_WEB_BASE_URL}/api/staff?organizationId=${encodeURIComponent(
+          user.organizationId,
+        )}&requesterId=${encodeURIComponent(user.authUser.$id)}`,
       );
       const data = await res.json();
 
@@ -430,6 +461,9 @@ export default function PmsProjectDetailScreen() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            // Web API expects the staff "accountId" (from /api/staff).
+            // Keep userId for backwards-compat with older handlers.
+            accountId: selectedStaffId,
             userId: selectedStaffId,
             roles: selectedMemberRoles,
             requesterId: user.authUser.$id,
@@ -487,8 +521,11 @@ export default function PmsProjectDetailScreen() {
           createdBy: user.authUser.$id,
         },
         [
-          Permission.read(Role.team((project.organizationId || user.organizationId) as string)),
-          Permission.update(Role.team(project.projectTeamId as string)),
+          // Permissions must use roles that exist in Appwrite.
+          // Some environments only have an org team (no per-project team roles),
+          // so we scope read/update to the org team to avoid invalid team:* permissions.
+          ...(project.organizationId ? [Permission.read(Role.team(String(project.organizationId)))] : []),
+          ...(project.organizationId ? [Permission.update(Role.team(String(project.organizationId)))] : []),
           Permission.delete(Role.label('admin')),
         ],
       );
@@ -600,8 +637,8 @@ export default function PmsProjectDetailScreen() {
           createdBy: user.authUser.$id,
         },
         [
-          Permission.read(Role.team((project.organizationId || user.organizationId) as string)),
-          Permission.update(Role.label('admin')),
+          ...(project.organizationId ? [Permission.read(Role.team(String(project.organizationId)))] : []),
+          ...(project.organizationId ? [Permission.update(Role.team(String(project.organizationId)))] : []),
           Permission.delete(Role.label('admin')),
         ],
       );
@@ -673,6 +710,19 @@ export default function PmsProjectDetailScreen() {
       return `${t.title || ''}`.toLowerCase().includes(term);
     });
   }, [tasks, search, priorityFilter]);
+
+  useEffect(() => {
+    setTasksPage(0);
+  }, [search, priorityFilter]);
+
+  const pagedTasks = useMemo(() => {
+    const take = (tasksPage + 1) * PAGE_SIZE;
+    return filteredTasks.slice(0, take);
+  }, [filteredTasks, tasksPage]);
+
+  const hasMoreTasks = useMemo(() => {
+    return pagedTasks.length < filteredTasks.length;
+  }, [pagedTasks.length, filteredTasks.length]);
 
   const statusCounts = useMemo(
     () => ({
@@ -834,6 +884,22 @@ export default function PmsProjectDetailScreen() {
             <>
               <View style={styles.headerCard}>
                 <View style={styles.headerTopRow}>
+                  <Pressable
+                    onPress={() => {
+                      try {
+                        router.back();
+                      } catch {
+                        router.replace('/pms/projects' as any);
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Go back"
+                    hitSlop={8}
+                    android_ripple={{ color: 'rgba(5, 70, 83, 0.10)' }}
+                    style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.9 }]}
+                  >
+                    <MaterialCommunityIcons name="chevron-left" size={22} color="#054653" />
+                  </Pressable>
                   <View style={styles.codeStatusRow}>
                     {project.code && (
                       <View style={styles.codeBadge}>
@@ -1010,7 +1076,7 @@ export default function PmsProjectDetailScreen() {
                   </View>
 
                   <FlatList
-                    data={filteredTasks}
+                    data={pagedTasks}
                     keyExtractor={(item) => item.$id}
                     renderItem={renderTask}
                     ListEmptyComponent={renderTasksEmpty}
@@ -1018,6 +1084,15 @@ export default function PmsProjectDetailScreen() {
                     scrollEnabled={false}
                     showsVerticalScrollIndicator={false}
                   />
+
+                  {hasMoreTasks && (
+                    <Pressable
+                      style={styles.loadMoreButton}
+                      onPress={() => setTasksPage((p) => p + 1)}
+                    >
+                      <Text style={styles.loadMoreButtonText}>Load more</Text>
+                    </Pressable>
+                  )}
                 </>
               )}
 
@@ -1246,7 +1321,7 @@ export default function PmsProjectDetailScreen() {
 
                   {!teamLoading && !teamError && filteredTeam.length > 0 && (
                     <FlatList
-                      data={filteredTeam}
+                      data={pagedTeam}
                       keyExtractor={(m) => m.accountId}
                       contentContainerStyle={styles.teamListContent}
                       scrollEnabled={false}
@@ -1331,6 +1406,15 @@ export default function PmsProjectDetailScreen() {
                         </View>
                       )}
                     />
+                  )}
+
+                  {!teamLoading && !teamError && hasMoreTeam && (
+                    <Pressable
+                      style={styles.loadMoreButton}
+                      onPress={() => setTeamPage((p) => p + 1)}
+                    >
+                      <Text style={styles.loadMoreButtonText}>Load more</Text>
+                    </Pressable>
                   )}
                 </View>
               )}
@@ -1818,14 +1902,43 @@ export default function PmsProjectDetailScreen() {
         >
           <View style={styles.newTaskModalOverlay}>
             <View style={styles.addMemberModalCard}>
-              <Text style={styles.addMemberModalTitle}>Add Project Member</Text>
-              <TextInput
-                style={styles.addMemberSearchInput}
-                placeholder="Search staff by name, username, email"
-                placeholderTextColor="#9ca3af"
-                value={staffSearch}
-                onChangeText={setStaffSearch}
-              />
+              <View style={styles.addMemberHeaderRow}>
+                <View style={styles.addMemberHeaderLeft}>
+                  <View style={styles.addMemberHeaderIcon}>
+                    <MaterialCommunityIcons name="account-plus-outline" size={18} color="#054653" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.addMemberModalTitle}>Add Member</Text>
+                    <Text style={styles.addMemberModalSubtitle} numberOfLines={1}>
+                      Select staff and assign project roles
+                    </Text>
+                  </View>
+                </View>
+                <Pressable
+                  hitSlop={10}
+                  disabled={availableStaffLoading}
+                  onPress={() => setShowAddMemberModal(false)}
+                  style={({ pressed }) => [styles.addMemberCloseBtn, pressed && { opacity: 0.85 }]}
+                >
+                  <MaterialCommunityIcons name="close" size={18} color="#64748b" />
+                </Pressable>
+              </View>
+
+              <View style={styles.addMemberSearchRow}>
+                <MaterialCommunityIcons name="magnify" size={18} color="#6b7280" />
+                <TextInput
+                  style={styles.addMemberSearchInput}
+                  placeholder="Search staff by name, username, email"
+                  placeholderTextColor="#9ca3af"
+                  value={staffSearch}
+                  onChangeText={setStaffSearch}
+                />
+                {staffSearch ? (
+                  <Pressable hitSlop={8} onPress={() => setStaffSearch('')}>
+                    <MaterialCommunityIcons name="close-circle" size={18} color="#9ca3af" />
+                  </Pressable>
+                ) : null}
+              </View>
 
               {availableStaffLoading && (
                 <View style={{ paddingVertical: 12 }}>
@@ -1839,16 +1952,16 @@ export default function PmsProjectDetailScreen() {
                 </Text>
               )}
 
-              <ScrollView style={styles.addMemberList}>
+              <ScrollView style={styles.addMemberList} showsVerticalScrollIndicator={false}>
                 {filteredStaff.map((staff) => {
                   const isSelected = selectedStaffId === staff.accountId;
                   return (
                     <Pressable
                       key={staff.accountId}
-                      style={styles.addMemberRow}
+                      style={[styles.addMemberRow, isSelected && styles.addMemberRowSelected]}
                       onPress={() => setSelectedStaffId(staff.accountId)}
                     >
-                      <View style={styles.addMemberRadioOuter}>
+                      <View style={[styles.addMemberRadioOuter, isSelected && styles.addMemberRadioOuterSelected]}>
                         {isSelected && <View style={styles.addMemberRadioInner} />}
                       </View>
                       <View style={styles.addMemberInfo}>
@@ -1870,26 +1983,33 @@ export default function PmsProjectDetailScreen() {
                 )}
               </ScrollView>
 
+              <Text style={styles.addMemberRolesLabel}>Project roles</Text>
               <View style={styles.addMemberRolesRow}>
                 {['member', 'developer', 'manager', 'lead', 'qa'].map((role) => {
                   const active = selectedMemberRoles.includes(role);
                   return (
                     <Pressable
                       key={role}
-                      style={[
+                      style={({ pressed }) => [
                         styles.addMemberRoleChip,
                         active && styles.addMemberRoleChipActive,
+                        pressed && { opacity: 0.9 },
                       ]}
                       onPress={() => toggleMemberRole(role)}
                     >
-                      <Text
-                        style={[
-                          styles.addMemberRoleText,
-                          active && styles.addMemberRoleTextActive,
-                        ]}
-                      >
-                        {projectRoleLabels[role] || role}
-                      </Text>
+                      <View style={styles.addMemberRoleChipInner}>
+                        {active ? (
+                          <MaterialCommunityIcons name="check" size={14} color="#ffffff" />
+                        ) : null}
+                        <Text
+                          style={[
+                            styles.addMemberRoleText,
+                            active && styles.addMemberRoleTextActive,
+                          ]}
+                        >
+                          {projectRoleLabels[role] || role}
+                        </Text>
+                      </View>
                     </Pressable>
                   );
                 })}
@@ -1911,6 +2031,58 @@ export default function PmsProjectDetailScreen() {
                   <Text style={styles.addMemberConfirmText}>
                     {availableStaffLoading ? 'Adding…' : 'Add Member'}
                   </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Remove Member confirmation modal */}
+        <Modal
+          transparent
+          visible={removeMemberOpen}
+          animationType="fade"
+          onRequestClose={closeRemoveMember}
+        >
+          <View style={styles.removeMemberOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeRemoveMember} />
+            <View style={styles.removeMemberCard}>
+              <View style={styles.removeMemberIconWrap}>
+                <MaterialCommunityIcons name="account-remove-outline" size={22} color="#b91c1c" />
+              </View>
+              <Text style={styles.removeMemberTitle}>Remove member?</Text>
+              <Text style={styles.removeMemberText}>
+                This will remove{' '}
+                <Text style={{ fontWeight: '900' }}>
+                  {removeMemberTarget
+                    ? `${removeMemberTarget.firstName || ''} ${removeMemberTarget.lastName || ''}`.trim() ||
+                      removeMemberTarget.username
+                    : 'this member'}
+                </Text>{' '}
+                from the project team.
+              </Text>
+
+              <View style={styles.removeMemberButtonsRow}>
+                <Pressable
+                  style={[styles.removeMemberCancelButton, removeMemberBusy && { opacity: 0.7 }]}
+                  disabled={removeMemberBusy}
+                  onPress={closeRemoveMember}
+                >
+                  <Text style={styles.removeMemberCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.removeMemberConfirmButton, removeMemberBusy && { opacity: 0.8 }]}
+                  disabled={removeMemberBusy}
+                  onPress={confirmRemoveMember}
+                >
+                  {removeMemberBusy ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ActivityIndicator size="small" color="#ffffff" />
+                      <Text style={styles.removeMemberConfirmText}>Removing…</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.removeMemberConfirmText}>Remove</Text>
+                  )}
                 </Pressable>
               </View>
             </View>
@@ -2146,6 +2318,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    overflow: 'hidden',
   },
   codeStatusRow: {
     flexDirection: 'row',
@@ -2478,6 +2662,22 @@ const styles = StyleSheet.create({
   tasksListContent: {
     paddingTop: 8,
     paddingBottom: 8,
+  },
+  loadMoreButton: {
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 6,
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  loadMoreButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#054653',
   },
   taskCard: {
     borderRadius: 14,
@@ -3338,22 +3538,71 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     paddingHorizontal: 16,
     paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  addMemberHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  addMemberHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  addMemberHeaderIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#e6f4f2',
+    borderWidth: 1,
+    borderColor: '#bfe7e1',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addMemberModalTitle: {
     fontSize: 16,
+    fontWeight: '900',
+    color: '#054653',
+  },
+  addMemberModalSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#6b7280',
     fontWeight: '600',
-    color: '#0f172a',
+  },
+  addMemberCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  addMemberSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     marginBottom: 8,
   },
   addMemberSearchInput: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    flex: 1,
     fontSize: 13,
     color: '#111827',
-    marginBottom: 8,
+    paddingVertical: 0,
   },
   addMemberList: {
     marginTop: 4,
@@ -3362,7 +3611,17 @@ const styles = StyleSheet.create({
   addMemberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    marginBottom: 8,
+  },
+  addMemberRowSelected: {
+    borderColor: '#054653',
+    backgroundColor: '#f1fbf9',
   },
   addMemberRadioOuter: {
     width: 18,
@@ -3374,48 +3633,67 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 10,
   },
+  addMemberRadioOuterSelected: {
+    borderColor: '#054653',
+  },
   addMemberRadioInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#0f766e',
+    backgroundColor: '#054653',
   },
   addMemberInfo: {
     flex: 1,
   },
   addMemberName: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '900',
     color: '#0f172a',
   },
   addMemberSubtitle: {
     fontSize: 11,
     color: '#6b7280',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  addMemberRolesLabel: {
+    marginTop: 4,
+    marginBottom: 6,
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0f172a',
   },
   addMemberRolesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 4,
-    gap: 6,
+    gap: 8,
+    paddingBottom: 2,
   },
   addMemberRoleChip: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#d1d5db',
+    backgroundColor: '#ffffff',
+  },
+  addMemberRoleChipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   addMemberRoleChipActive: {
-    backgroundColor: '#0f766e',
-    borderColor: '#0f766e',
+    backgroundColor: '#111827',
+    borderColor: '#111827',
   },
   addMemberRoleText: {
     fontSize: 12,
-    color: '#374151',
+    color: '#111827',
+    fontWeight: '900',
   },
   addMemberRoleTextActive: {
     color: '#ffffff',
-    fontWeight: '600',
+    fontWeight: '900',
   },
   addMemberButtonsRow: {
     flexDirection: 'row',
@@ -3427,11 +3705,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   addMemberCancelText: {
     fontSize: 13,
     color: '#374151',
+    fontWeight: '900',
   },
   addMemberConfirmButton: {
     paddingHorizontal: 14,
@@ -3441,7 +3722,82 @@ const styles = StyleSheet.create({
   },
   addMemberConfirmText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+
+  removeMemberOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17,24,39,0.55)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  removeMemberCard: {
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  removeMemberIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  removeMemberTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  removeMemberText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  removeMemberButtonsRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  removeMemberCancelButton: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeMemberCancelText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#374151',
+  },
+  removeMemberConfirmButton: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: '#b91c1c',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeMemberConfirmText: {
+    fontSize: 12,
+    fontWeight: '900',
     color: '#ffffff',
   },
 });

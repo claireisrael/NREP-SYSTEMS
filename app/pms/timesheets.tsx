@@ -57,9 +57,13 @@ export default function PmsTimesheetsScreen() {
       setLoading(true);
       setError(null);
 
-      const url = `${PMS_WEB_BASE_URL}/api/timesheets/dashboard?accountId=${encodeURIComponent(
-        user.authUser.$id,
-      )}&organizationId=${encodeURIComponent(user.organizationId)}`;
+      // Web API expects requesterId for authorization checks.
+      // Keep accountId too for backwards compatibility with older handlers.
+      const url =
+        `${PMS_WEB_BASE_URL}/api/timesheets/dashboard` +
+        `?accountId=${encodeURIComponent(user.authUser.$id)}` +
+        `&requesterId=${encodeURIComponent(user.authUser.$id)}` +
+        `&organizationId=${encodeURIComponent(user.organizationId)}`;
 
       const res = await fetch(url);
       const data = await res.json();
@@ -108,6 +112,7 @@ export default function PmsTimesheetsScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           accountId: user.authUser.$id,
+          requesterId: user.authUser.$id,
           organizationId: user.organizationId,
           weekStart,
           entries: [],
@@ -306,9 +311,14 @@ export default function PmsTimesheetsScreen() {
     const list = dashboard?.recentTimesheets || [];
 
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, styles.recentCard]}>
         <View style={styles.cardHeaderRow}>
-          <Text style={styles.cardTitle}>Recent Timesheets</Text>
+          <View style={styles.recentHeaderLeft}>
+            <View style={styles.recentHeaderIcon}>
+              <MaterialCommunityIcons name="history" size={18} color="#054653" />
+            </View>
+            <Text style={styles.cardTitle}>Recent Timesheets</Text>
+          </View>
         </View>
 
         {list.length === 0 ? (
@@ -322,17 +332,30 @@ export default function PmsTimesheetsScreen() {
               month: 'short',
               day: 'numeric',
             })}`;
+            const statusText = getStatusBadgeText(ts);
+            const statusUpper = String(statusText || '').toLowerCase();
+            const statusStyle =
+              statusUpper.includes('rejected')
+                ? styles.recentStatusReject
+                : statusUpper.includes('approved')
+                  ? styles.recentStatusApprove
+                  : statusUpper.includes('supervisor')
+                    ? styles.recentStatusSupervisor
+                    : statusUpper.includes('admin')
+                      ? styles.recentStatusAdmin
+                      : styles.recentStatusDraft;
 
             return (
-              <View key={ts.$id} style={styles.timesheetRow}>
+              <View key={ts.$id} style={styles.recentRow}>
+                <View style={styles.recentAccent} />
                 <View style={styles.timesheetLeft}>
                   <Text style={styles.timesheetPeriod}>{periodLabel}</Text>
                   <Text style={styles.timesheetMeta}>
                     {ts.totalHours ?? 0}h · {ts.entriesCount ?? 0} entries
                   </Text>
                 </View>
-                <View style={styles.statusBadgeSmall}>
-                  <Text style={styles.statusBadgeSmallText}>{getStatusBadgeText(ts)}</Text>
+                <View style={[styles.recentStatusPill, statusStyle]}>
+                  <Text style={styles.recentStatusText}>{statusText}</Text>
                 </View>
               </View>
             );
@@ -401,21 +424,36 @@ export default function PmsTimesheetsScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.header}>
-            <View style={styles.headerTitleBlock}>
-              <View style={styles.headerLabelRow}>
-                <MaterialCommunityIcons
-                  name="clock-time-four-outline"
-                  size={20}
-                  color="#0f766e"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={[styles.headerTitle, { color: textColor }]}>Timesheets</Text>
+          <View style={styles.headerCard}>
+            <View style={styles.headerTopRow}>
+              <View style={styles.headerIconWrap}>
+                <MaterialCommunityIcons name="clock-time-four-outline" size={20} color="#054653" />
               </View>
-              <Text style={[styles.headerSubtitleSmall, { color: textColor }]}>
-                Dashboard overview of your weekly time.
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>Timesheets</Text>
+                <Text style={styles.headerSubtitleSmall}>
+                  Track your weekly time and submit for approval.
+                </Text>
+              </View>
+              <View style={styles.headerAccentPill}>
+                <Text style={styles.headerAccentText}>PMS</Text>
+              </View>
             </View>
+
+            {dashboard?.currentWeekStats ? (
+              <View style={styles.headerChipsRow}>
+                <View style={styles.headerChip}>
+                  <Text style={styles.headerChipLabel}>This week</Text>
+                  <Text style={styles.headerChipValue}>
+                    {(dashboard.currentWeekStats.totalHours ?? 0).toFixed(1)}h
+                  </Text>
+                </View>
+                <View style={styles.headerChip}>
+                  <Text style={styles.headerChipLabel}>Status</Text>
+                  <Text style={styles.headerChipValue}>{getStatusBadgeText(dashboard.currentWeekStats)}</Text>
+                </View>
+              </View>
+            ) : null}
           </View>
 
           {renderQuickActions()}
@@ -468,27 +506,84 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 80,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerCard: {
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  headerTitleBlock: {
-    flex: 1,
-  },
-  headerLabelRow: {
+  headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 2,
+    gap: 10,
+  },
+  headerIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: '#e6f4f2',
+    borderWidth: 1,
+    borderColor: '#bfe7e1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAccentPill: {
+    paddingHorizontal: 10,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: '#FFB803',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAccentText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#054653',
+    letterSpacing: 0.4,
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontWeight: '900',
+    color: '#054653',
   },
   headerSubtitleSmall: {
     fontSize: 12,
     color: '#6b7280',
+    fontWeight: '600',
+  },
+  headerChipsRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  headerChip: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  headerChipLabel: {
+    fontSize: 11,
+    color: '#6b7280',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  headerChipValue: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#0f172a',
+    fontWeight: '900',
   },
   centerRow: {
     flexDirection: 'row',
@@ -615,6 +710,73 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.03,
     shadowRadius: 4,
     elevation: 1,
+  },
+  recentCard: {
+    borderColor: '#dbeafe',
+  },
+  recentHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recentHeaderIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 12,
+    backgroundColor: '#e6f4f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#bfe7e1',
+  },
+  recentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  recentAccent: {
+    width: 4,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: '#054653',
+    opacity: 0.9,
+  },
+  recentStatusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  recentStatusText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#054653',
+    textTransform: 'uppercase',
+  },
+  recentStatusDraft: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#e5e7eb',
+  },
+  recentStatusSupervisor: {
+    backgroundColor: '#ecfeff',
+    borderColor: '#a5f3fc',
+  },
+  recentStatusAdmin: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#fed7aa',
+  },
+  recentStatusApprove: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#bbf7d0',
+  },
+  recentStatusReject: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
   },
   cardHeaderRow: {
     flexDirection: 'row',

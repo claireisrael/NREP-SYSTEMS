@@ -266,7 +266,12 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
       }
     };
 
-    loadSession();
+    // Prevent any unexpected unhandled promise rejections from bubbling to the runtime.
+    loadSession().catch(() => {
+      if (!isMounted) return;
+      setUser(null);
+      setIsLoading(false);
+    });
 
     return () => {
       isMounted = false;

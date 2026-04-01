@@ -31,7 +31,7 @@ export default function HrRequestsScreen() {
   const [completedItems, setCompletedItems] = useState<any[]>([]);
   const [approvers, setApprovers] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'my' | 'approvals' | 'completed'>('my');
-  const [page, setPage] = useState(0); // 0-based (client-side paging)
+  const [page, setPage] = useState(0); // 0-based (server paging for "My Requests")
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -81,7 +81,8 @@ export default function HrRequestsScreen() {
         hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
           Query.equal('userId', baseUserId),
           Query.orderDesc('submissionDate'),
-          Query.limit(100),
+          Query.limit(PAGE_SIZE),
+          Query.offset(0),
         ]),
         hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
           Query.equal('departmentReviewerId', baseUserId),
@@ -149,7 +150,7 @@ export default function HrRequestsScreen() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [user?.$id, user?.departmentName, user?.systemRole]);
+  }, [PAGE_SIZE, user?.$id, user?.departmentName, user?.systemRole]);
 
   const loadPage = useCallback(
     async (nextPage: number, mode: 'replace' | 'append') => {
@@ -467,8 +468,7 @@ export default function HrRequestsScreen() {
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil((total ?? items.length) / PAGE_SIZE));
 
   return (
     <ThemedView style={styles.container}>
@@ -621,7 +621,7 @@ export default function HrRequestsScreen() {
                       </Pressable>
                     </View>
                   ) : (
-                    pageItems.map((r) => {
+                    filtered.map((r) => {
                       const canEdit = canEditRequest(r, user);
                       const canDelete = String(r.status || '').toUpperCase() === 'DRAFT';
                       const t = typeColor(r.requestType);
@@ -667,6 +667,16 @@ export default function HrRequestsScreen() {
                     })
                   )}
                 </View>
+
+                {hasMore && !search.trim() && statusFilter === 'all' ? (
+                  <Pressable
+                    onPress={() => loadPage(page + 1, 'append')}
+                    style={[styles.retryBtn, { alignSelf: 'center' }, loadingMore && { opacity: 0.7 }]}
+                    disabled={loadingMore}
+                  >
+                    <Text style={styles.retryText}>{loadingMore ? 'Loading…' : 'Load more'}</Text>
+                  </Pressable>
+                ) : null}
               </>
             ) : activeTab === 'approvals' ? (
               <View style={styles.listCard}>
@@ -760,7 +770,7 @@ export default function HrRequestsScreen() {
 
             <View style={styles.paginationRow}>
               <Pressable
-                onPress={() => setPage((p) => Math.max(0, p - 1))}
+                onPress={() => loadPage(Math.max(0, page - 1), 'replace')}
                 style={[styles.pageBtn, page === 0 && styles.pageBtnDisabled]}
                 disabled={page === 0 || loadingMore}
               >
@@ -771,12 +781,12 @@ export default function HrRequestsScreen() {
 
               <Text style={styles.pageText}>
                 Page {page + 1}
-                {filtered.length ? ` • ${Math.min((page + 1) * PAGE_SIZE, filtered.length)}/${filtered.length}` : ''}
+                {total !== null ? ` • ${Math.min((page + 1) * PAGE_SIZE, total)}/${total}` : ''}
               </Text>
 
               {page + 1 < totalPages ? (
                 <Pressable
-                  onPress={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  onPress={() => loadPage(Math.min(totalPages - 1, page + 1), 'replace')}
                   style={[styles.pageBtn, styles.pageBtnPrimary, loadingMore && styles.pageBtnDisabled]}
                   disabled={loadingMore}
                 >

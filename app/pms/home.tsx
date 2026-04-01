@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -19,6 +21,7 @@ import { useAuth } from '@/context/AuthContext';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 
 const PMS_WEB_BASE_URL = 'https://projects.nrep.ug';
+const NREP_SITE_URL = 'https://nrep.ug/';
 
 type Project = {
   $id: string;
@@ -176,9 +179,11 @@ export default function PmsHomeScreen() {
 
           // Weekly hours via the same dashboard API used on web
           try {
-            const url = `${PMS_WEB_BASE_URL}/api/timesheets/dashboard?accountId=${encodeURIComponent(
-              accountId,
-            )}&organizationId=${encodeURIComponent(user.organizationId)}`;
+            const url =
+              `${PMS_WEB_BASE_URL}/api/timesheets/dashboard` +
+              `?accountId=${encodeURIComponent(accountId)}` +
+              `&requesterId=${encodeURIComponent(accountId)}` +
+              `&organizationId=${encodeURIComponent(user.organizationId)}`;
             const res = await fetch(url);
             const data = await res.json();
             if (res.ok && data?.currentWeekStats) {
@@ -213,6 +218,16 @@ export default function PmsHomeScreen() {
   const rawDisplayName =
     user?.profile?.firstName || user?.profile?.username || user?.profile?.email || 'User';
   const displayName = rawDisplayName.replace(/!/g, '');
+
+  const handleOpenNrepSite = async () => {
+    try {
+      const supported = await Linking.canOpenURL(NREP_SITE_URL);
+      if (!supported) return;
+      await Linking.openURL(NREP_SITE_URL);
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: pageBackground }]}>
@@ -249,6 +264,29 @@ export default function PmsHomeScreen() {
             </Text>
           </View>
         </View>
+
+        <Pressable
+          onPress={handleOpenNrepSite}
+          hitSlop={8}
+          android_ripple={{ color: 'rgba(255, 255, 255, 0.14)' }}
+          accessibilityRole="link"
+          accessibilityLabel="Visit the NREP website"
+          accessibilityHint="Opens the NREP website in your browser"
+          style={({ pressed }) => [styles.nrepCtaCard, pressed && { opacity: 0.92 }]}
+        >
+          <View style={styles.nrepCtaLeft}>
+            <View style={styles.nrepCtaIconWrap}>
+              <MaterialCommunityIcons name="web" size={18} color="#ffffff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nrepCtaTitle}>VISIT THE NREP SITE</Text>
+              <Text style={styles.nrepCtaUrl} numberOfLines={1}>
+                nrep.ug
+              </Text>
+            </View>
+          </View>
+          <MaterialCommunityIcons name="arrow-top-right" size={18} color="#ffffff" />
+        </Pressable>
 
         <ScrollView
           style={styles.scroll}
@@ -341,9 +379,30 @@ export default function PmsHomeScreen() {
                       style={styles.projectCard}
                       onPress={() => router.push(`/pms/projects/${item.$id}`)}
                     >
+                      <View
+                        style={[
+                          styles.projectAccent,
+                          item.status === 'active' && styles.projectAccentActive,
+                          item.status === 'at_risk' && styles.projectAccentRisk,
+                          item.status === 'on_hold' && styles.projectAccentOnHold,
+                          item.status === 'planned' && styles.projectAccentPlanned,
+                          item.status === 'completed' && styles.projectAccentCompleted,
+                        ]}
+                      />
+
                       <View style={styles.projectHeaderRow}>
-                        <Text style={styles.projectName}>{item.name}</Text>
-                        {item.status && (
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.projectName} numberOfLines={2}>
+                            {item.name}
+                          </Text>
+                          {item.clientName ? (
+                            <Text style={styles.projectMeta} numberOfLines={1}>
+                              Lead: {item.clientName}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        {item.status ? (
                           <View
                             style={[
                               styles.statusPill,
@@ -351,15 +410,23 @@ export default function PmsHomeScreen() {
                               item.status === 'at_risk' && styles.statusPillRisk,
                             ]}
                           >
-                            <Text style={styles.statusPillText}>
+                            <Text
+                              style={[
+                                styles.statusPillText,
+                                item.status === 'active' && { color: '#047857' },
+                                item.status === 'at_risk' && { color: '#b91c1c' },
+                                item.status === 'on_hold' && { color: '#92400e' },
+                                item.status === 'planned' && { color: '#1d4ed8' },
+                                item.status === 'completed' && { color: '#054653' },
+                                item.status === 'cancelled' && { color: '#6b7280' },
+                              ]}
+                            >
                               {formatStatusLabel(item.status)}
                             </Text>
                           </View>
-                        )}
+                        ) : null}
                       </View>
-                      {item.clientName && (
-                        <Text style={styles.projectMeta}>Lead: {item.clientName}</Text>
-                      )}
+
                       {item.progress !== undefined && (
                         <>
                           <Text style={styles.progressLabel}>Progress</Text>
@@ -401,17 +468,27 @@ export default function PmsHomeScreen() {
                       <View style={styles.projectHeaderRow}>
                         <Text style={styles.projectName}>{item.name}</Text>
                         {item.status && (
-                          <View
+                        <View
+                          style={[
+                            styles.statusPill,
+                            item.status === 'active' && styles.statusPillOnTrack,
+                            item.status === 'at_risk' && styles.statusPillRisk,
+                          ]}
+                        >
+                          <Text
                             style={[
-                              styles.statusPill,
-                              item.status === 'active' && styles.statusPillOnTrack,
-                              item.status === 'at_risk' && styles.statusPillRisk,
+                              styles.statusPillText,
+                              item.status === 'active' && { color: '#047857' },
+                              item.status === 'at_risk' && { color: '#b91c1c' },
+                              item.status === 'on_hold' && { color: '#92400e' },
+                              item.status === 'planned' && { color: '#1d4ed8' },
+                              item.status === 'completed' && { color: '#054653' },
+                              item.status === 'cancelled' && { color: '#6b7280' },
                             ]}
                           >
-                            <Text style={styles.statusPillText}>
-                              {formatStatusLabel(item.status)}
-                            </Text>
-                          </View>
+                            {formatStatusLabel(item.status)}
+                          </Text>
+                        </View>
                         )}
                       </View>
                       {item.clientName && (
@@ -565,6 +642,45 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 6,
     elevation: 2,
+  },
+  nrepCtaCard: {
+    marginTop: -4,
+    marginBottom: 2,
+    borderRadius: 16,
+    backgroundColor: '#054653',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  nrepCtaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    paddingRight: 10,
+  },
+  nrepCtaIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nrepCtaTitle: {
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 12,
+    letterSpacing: 0.4,
+  },
+  nrepCtaUrl: {
+    marginTop: 2,
+    color: 'rgba(224, 242, 254, 0.95)',
+    fontSize: 12,
+    fontWeight: '600',
   },
   welcomeLeft: {
     flex: 1,
@@ -835,7 +951,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
+    overflow: 'hidden',
   },
+  projectAccent: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: 4,
+    borderRadius: 999,
+    backgroundColor: '#9ca3af',
+    opacity: 0.9,
+  },
+  projectAccentActive: { backgroundColor: '#14B8A6' },
+  projectAccentRisk: { backgroundColor: '#dc2626' },
+  projectAccentOnHold: { backgroundColor: '#f59e0b' },
+  projectAccentPlanned: { backgroundColor: '#2563eb' },
+  projectAccentCompleted: { backgroundColor: '#054653' },
   projectTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -859,6 +991,39 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
     marginBottom: 10,
+  },
+  projectHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  projectMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '600',
+  },
+  progressLabel: {
+    marginTop: 10,
+    fontSize: 11,
+    color: '#6b7280',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  progressBarTrack: {
+    marginTop: 6,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: '#f3f4f6',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#14B8A6',
   },
   clientCard: {
     flexDirection: 'row',
@@ -905,18 +1070,22 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   statusPillOnTrack: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: '#ecfdf5',
+    borderColor: '#bbf7d0',
   },
   statusPillRisk: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
   },
   statusPillText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#064e3b',
+    fontWeight: '800',
+    color: '#374151',
   },
   budgetRow: {
     flexDirection: 'row',

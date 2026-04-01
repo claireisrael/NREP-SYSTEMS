@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   InteractionManager,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,6 +19,8 @@ import { useHrAuth } from '@/context/HrAuthContext';
 import { HrBottomNav } from '@/components/HrBottomNav';
 import { HrLogoSpinner } from '@/components/HrLogoSpinner';
 import { HR_COLLECTIONS, HR_DB_ID, hrDatabases, Query } from '@/lib/appwrite';
+
+const NREP_SITE_URL = 'https://nrep.ug/';
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -131,6 +134,16 @@ export default function HrHomeScreen() {
       });
     }
   }, [logout, router, signingOut, isLoggingOut]);
+
+  const handleOpenNrepSite = useCallback(async () => {
+    try {
+      const supported = await Linking.canOpenURL(NREP_SITE_URL);
+      if (!supported) return;
+      await Linking.openURL(NREP_SITE_URL);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const loadDashboardBits = useCallback(async () => {
       const seq = ++loadSeqRef.current;
@@ -301,6 +314,33 @@ export default function HrHomeScreen() {
           </View>
         </View>
 
+        <Pressable
+          onPress={handleOpenNrepSite}
+          hitSlop={8}
+          android_ripple={{ color: 'rgba(5, 70, 83, 0.08)' }}
+          accessibilityRole="link"
+          accessibilityLabel="Visit the NREP website"
+          accessibilityHint="Opens the NREP website in your browser"
+          style={({ pressed }) => [styles.nrepCtaCard, pressed && { opacity: 0.9 }]}
+        >
+          <View style={styles.nrepCtaLeft}>
+            <View style={styles.nrepCtaIconWrap}>
+              <MaterialCommunityIcons name="web" size={18} color="#054653" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <ThemedText type="default" style={styles.nrepCtaTitle}>
+                VISIT THE NREP SITE
+              </ThemedText>
+              <ThemedText type="default" style={styles.nrepCtaUrl} numberOfLines={1}>
+                nrep.ug
+              </ThemedText>
+            </View>
+          </View>
+          <View style={styles.nrepCtaRight}>
+            <MaterialCommunityIcons name="arrow-top-right" size={18} color="#054653" />
+          </View>
+        </Pressable>
+
         <View style={styles.sectionHeaderRow}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
             Overview
@@ -465,6 +505,60 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 6,
     marginBottom: 20,
+  },
+  nrepCtaCard: {
+    marginTop: -6,
+    marginBottom: 18,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  nrepCtaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    paddingRight: 10,
+  },
+  nrepCtaIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#e6f4f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nrepCtaTitle: {
+    color: '#054653',
+    fontWeight: '900',
+    fontSize: 12,
+    letterSpacing: 0.4,
+  },
+  nrepCtaUrl: {
+    marginTop: 2,
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  nrepCtaRight: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   welcomeTopRow: {
     flexDirection: 'row',

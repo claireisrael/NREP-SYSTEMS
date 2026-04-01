@@ -94,7 +94,9 @@ export default function MyTimesheetsScreen() {
 
         // Load projects
         const projectsRes = await fetch(
-          `${PMS_WEB_BASE_URL}/api/projects?organizationId=${encodeURIComponent(organizationId)}`,
+          `${PMS_WEB_BASE_URL}/api/projects?organizationId=${encodeURIComponent(
+            organizationId,
+          )}&requesterId=${encodeURIComponent(accountId)}`,
         );
         const projectsData = await projectsRes.json();
         if (projectsRes.ok) {
@@ -109,6 +111,8 @@ export default function MyTimesheetsScreen() {
         const tsRes = await fetch(
           `${PMS_WEB_BASE_URL}/api/timesheets?accountId=${encodeURIComponent(
             accountId,
+          )}&requesterId=${encodeURIComponent(accountId)}&organizationId=${encodeURIComponent(
+            organizationId,
           )}&weekStart=${encodeURIComponent(weekStart)}`,
         );
         const tsData = await tsRes.json();
@@ -339,6 +343,7 @@ export default function MyTimesheetsScreen() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             accountId,
+            requesterId: accountId,
             organizationId,
             weekStart,
             entries: [payload],
@@ -356,6 +361,8 @@ export default function MyTimesheetsScreen() {
       const tsRes = await fetch(
         `${PMS_WEB_BASE_URL}/api/timesheets?accountId=${encodeURIComponent(
           accountId,
+        )}&requesterId=${encodeURIComponent(accountId)}&organizationId=${encodeURIComponent(
+          organizationId,
         )}&weekStart=${encodeURIComponent(weekStart)}`,
       );
       const tsData = await tsRes.json();
@@ -431,6 +438,8 @@ export default function MyTimesheetsScreen() {
         body: JSON.stringify({
           timesheetId: timesheet.$id,
           action: 'submit',
+          requesterId: accountId,
+          organizationId,
         }),
       });
 

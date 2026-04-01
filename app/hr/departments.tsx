@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -35,6 +36,17 @@ export default function HrDepartmentsScreen() {
   const [departments, setDepartments] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const DEPT_PAGE_SIZE = 10;
+  const [deptTotal, setDeptTotal] = useState<number | null>(null);
+  const [deptPage, setDeptPage] = useState(0); // 0-based
+  const [deptLoadingMore, setDeptLoadingMore] = useState(false);
+
+  const ROLE_PAGE_SIZE = 10;
+  const [rolesTotal, setRolesTotal] = useState<number | null>(null);
+  const [rolesPage, setRolesPage] = useState(0); // 0-based
+  const [rolesLoadingMore, setRolesLoadingMore] = useState(false);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
@@ -88,22 +100,42 @@ export default function HrDepartmentsScreen() {
     }
   }, [isLoading, user, isSeniorManager, router]);
 
-  const loadAll = useCallback(async () => {
+  const loadDepartmentsPage = useCallback(
+    async (nextPage: number, mode: 'replace' | 'append') => {
+      try {
+        mode === 'append' ? setDeptLoadingMore(true) : setLoading(true);
+        setError(null);
+        const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.DEPARTMENTS, [
+          Query.orderAsc('name'),
+          Query.limit(DEPT_PAGE_SIZE),
+          Query.offset(nextPage * DEPT_PAGE_SIZE),
+        ]);
+        const docs = ((res as any)?.documents ?? []) as any[];
+        const totalCount = (res as any)?.total ?? docs.length;
+        setDeptTotal(totalCount);
+        setDeptPage(nextPage);
+        setDepartments((prev) => (mode === 'append' ? [...prev, ...docs] : docs));
+      } catch (e: any) {
+        setError(e?.message || 'Failed to load departments.');
+      } finally {
+        mode === 'append' ? setDeptLoadingMore(false) : setLoading(false);
+      }
+    },
+    [DEPT_PAGE_SIZE]
+  );
+
+  const loadUsers = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      const [deptRes, userRes] = await Promise.all([
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.DEPARTMENTS, [Query.orderAsc('name'), Query.limit(500)]),
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [Query.limit(800)]),
-      ]);
-      setDepartments(((deptRes as any)?.documents ?? []) as any[]);
+      const userRes = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [Query.limit(800)]);
       setUsers(((userRes as any)?.documents ?? []) as any[]);
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load departments.');
-    } finally {
-      setLoading(false);
+    } catch {
+      // ignore; users list is mainly for pickers/labels
     }
   }, []);
+
+  const loadAll = useCallback(async () => {
+    await Promise.all([loadDepartmentsPage(0, 'replace'), loadUsers()]);
+  }, [loadDepartmentsPage, loadUsers]);
 
   useEffect(() => {
     if (!isLoading && user && isSeniorManager) loadAll();
@@ -115,15 +147,42 @@ export default function HrDepartmentsScreen() {
       setRolesError(null);
       const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.ROLES, [
         Query.orderAsc('name'),
-        Query.limit(800),
+        Query.limit(ROLE_PAGE_SIZE),
+        Query.offset(0),
       ]);
-      setRoles(((res as any)?.documents ?? []) as any[]);
+      const docs = ((res as any)?.documents ?? []) as any[];
+      setRolesTotal((res as any)?.total ?? docs.length);
+      setRolesPage(0);
+      setRoles(docs);
     } catch (e: any) {
       setRolesError(e?.message || 'Failed to load roles.');
     } finally {
       setRolesLoading(false);
     }
-  }, []);
+  }, [ROLE_PAGE_SIZE]);
+
+  const loadMoreRoles = useCallback(async () => {
+    if (rolesLoadingMore) return;
+    if (rolesTotal !== null && roles.length >= rolesTotal) return;
+    try {
+      setRolesLoadingMore(true);
+      setRolesError(null);
+      const nextPage = rolesPage + 1;
+      const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.ROLES, [
+        Query.orderAsc('name'),
+        Query.limit(ROLE_PAGE_SIZE),
+        Query.offset(nextPage * ROLE_PAGE_SIZE),
+      ]);
+      const docs = ((res as any)?.documents ?? []) as any[];
+      setRolesTotal((res as any)?.total ?? rolesTotal ?? docs.length);
+      setRolesPage(nextPage);
+      setRoles((prev) => [...prev, ...docs]);
+    } catch (e: any) {
+      setRolesError(e?.message || 'Failed to load roles.');
+    } finally {
+      setRolesLoadingMore(false);
+    }
+  }, [ROLE_PAGE_SIZE, roles.length, rolesLoadingMore, rolesPage, rolesTotal]);
 
   useEffect(() => {
     if (!isLoading && user && isSeniorManager && activeTab === 'positions_roles') {
@@ -281,6 +340,25 @@ export default function HrDepartmentsScreen() {
     });
   }, [departments, search, managerLabel, getDeptHeadId]);
 
+  const hasMoreDepartments = useMemo(() => {
+    if (deptTotal === null) return false;
+    return departments.length < deptTotal;
+  }, [departments.length, deptTotal]);
+
+  const hasMoreRoles = useMemo(() => {
+    if (rolesTotal === null) return false;
+    return roles.length < rolesTotal;
+  }, [roles.length, rolesTotal]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadAll();
+    if (activeTab === 'positions_roles') {
+      await loadRoles();
+    }
+    setRefreshing(false);
+  }, [activeTab, loadAll, loadRoles]);
+
   const openCreate = () => {
     setEditing(null);
     setForm({ name: '', managerId: '' });
@@ -422,6 +500,7 @@ export default function HrDepartmentsScreen() {
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#054653" />}
       >
         <View style={styles.headerCard}>
           <View style={styles.headerRow}>
@@ -574,6 +653,16 @@ export default function HrDepartmentsScreen() {
                     </View>
                   ))
                 )}
+
+                {hasMoreRoles ? (
+                  <Pressable
+                    style={[styles.retryBtn, { marginTop: 12, alignSelf: 'center' }, rolesLoadingMore && { opacity: 0.7 }]}
+                    onPress={loadMoreRoles}
+                    disabled={rolesLoadingMore}
+                  >
+                    <Text style={styles.retryText}>{rolesLoadingMore ? 'Loading…' : 'Load more'}</Text>
+                  </Pressable>
+                ) : null}
               </View>
             )}
           </>
@@ -617,6 +706,16 @@ export default function HrDepartmentsScreen() {
                 </View>
               ))
             )}
+
+            {hasMoreDepartments && !search.trim() ? (
+              <Pressable
+                style={[styles.retryBtn, { marginTop: 12, alignSelf: 'center' }, deptLoadingMore && { opacity: 0.7 }]}
+                onPress={() => loadDepartmentsPage(deptPage + 1, 'append')}
+                disabled={deptLoadingMore}
+              >
+                <Text style={styles.retryText}>{deptLoadingMore ? 'Loading…' : 'Load more'}</Text>
+              </Pressable>
+            ) : null}
           </View>
         )}
       </ScrollView>

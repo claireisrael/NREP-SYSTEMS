@@ -17,7 +17,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
-import { useThemeColor } from '@/hooks/use-theme-color';
 
 const PMS_WEB_BASE_URL = 'https://projects.nrep.ug';
 
@@ -42,8 +41,10 @@ export default function PmsApprovalsScreen() {
   const [approvalComments, setApprovalComments] = useState('');
   const [rejectionComments, setRejectionComments] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  const textColor = useThemeColor({}, 'text');
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [successKind, setSuccessKind] = useState<'approve' | 'reject'>('approve');
+  const [successTitle, setSuccessTitle] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const canSeeApprovals = user?.isAdmin || user?.isSupervisor || user?.isFinance;
 
@@ -176,7 +177,7 @@ export default function PmsApprovalsScreen() {
   };
 
   const submitAction = async (action: 'approve' | 'reject') => {
-    if (!selectedTimesheet || !user?.authUser?.$id) return;
+    if (!selectedTimesheet || !user?.authUser?.$id || !user?.organizationId) return;
 
     const comments = action === 'approve' ? approvalComments : rejectionComments;
     if (!comments.trim()) {
@@ -195,6 +196,8 @@ export default function PmsApprovalsScreen() {
           timesheetId: selectedTimesheet.$id,
           action,
           managerId: user.authUser.$id,
+          requesterId: user.authUser.$id,
+          organizationId: user.organizationId,
           approvalComments: action === 'approve' ? comments : undefined,
           rejectionComments: action === 'reject' ? comments : undefined,
         }),
@@ -206,12 +209,14 @@ export default function PmsApprovalsScreen() {
         throw new Error(data?.error || `Failed to ${action} timesheet`);
       }
 
-      Alert.alert(
-        'Success',
+      setSuccessKind(action);
+      setSuccessTitle(action === 'approve' ? 'Approved' : 'Rejected');
+      setSuccessMessage(
         action === 'approve'
-          ? 'Timesheet approved successfully.'
-          : 'Timesheet rejected with feedback.',
+          ? 'Timesheet approved successfully. It will move to the next review stage (if any) on the web flow.'
+          : 'Timesheet rejected with feedback. The staff member can review your comments and resubmit.',
       );
+      setSuccessOpen(true);
 
       // Refresh list
       const updated = timesheets.map((t) =>
@@ -236,12 +241,20 @@ export default function PmsApprovalsScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.header}>
-            <View style={styles.headerTitleBlock}>
-              <Text style={[styles.headerTitle, { color: textColor }]}>Timesheet Approvals</Text>
-              <Text style={[styles.headerSubtitleSmall, { color: textColor }]}>
-                Review and approve team member timesheets.
-              </Text>
+          <View style={styles.headerCard}>
+            <View style={styles.headerTopRow}>
+              <View style={styles.headerIconWrap}>
+                <MaterialCommunityIcons name="clipboard-check-outline" size={20} color="#054653" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>Timesheet Approvals</Text>
+                <Text style={styles.headerSubtitleSmall}>
+                  Review, approve, or reject team timesheets.
+                </Text>
+              </View>
+              <View style={styles.headerCountPill}>
+                <Text style={styles.headerCountText}>{filteredTimesheets.length}</Text>
+              </View>
             </View>
           </View>
 
@@ -582,6 +595,38 @@ export default function PmsApprovalsScreen() {
           </View>
         </Modal>
 
+        {/* Success modal (approve / reject) */}
+        <Modal
+          transparent
+          visible={successOpen}
+          animationType="fade"
+          onRequestClose={() => setSuccessOpen(false)}
+        >
+          <View style={styles.successOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSuccessOpen(false)} />
+            <View style={styles.successCard}>
+              <View
+                style={[
+                  styles.successIconWrap,
+                  successKind === 'approve' ? styles.successIconWrapApprove : styles.successIconWrapReject,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={successKind === 'approve' ? 'check-circle-outline' : 'close-circle-outline'}
+                  size={26}
+                  color={successKind === 'approve' ? '#16a34a' : '#b91c1c'}
+                />
+              </View>
+              <Text style={styles.successTitle}>{successTitle}</Text>
+              <Text style={styles.successMessage}>{successMessage}</Text>
+
+              <Pressable style={styles.successButton} onPress={() => setSuccessOpen(false)}>
+                <Text style={styles.successButtonText}>Done</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
         <PmsBottomNav />
       </ThemedView>
     </SafeAreaView>
@@ -601,21 +646,59 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 80,
   },
-  header: {
+  headerCard: {
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  headerTitleBlock: {
-    flex: 1,
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: '#e6f4f2',
+    borderWidth: 1,
+    borderColor: '#bfe7e1',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontWeight: '900',
+    color: '#054653',
   },
   headerSubtitleSmall: {
-    marginTop: 2,
+    marginTop: 4,
     fontSize: 12,
     color: '#6b7280',
+    fontWeight: '600',
+  },
+  headerCountPill: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#054653',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  headerCountText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
   },
   centerRow: {
     flexDirection: 'row',
@@ -655,19 +738,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   searchIcon: {
     marginRight: 6,
   },
   searchInput: {
     flex: 1,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
     fontSize: 13,
     color: '#111827',
+    paddingVertical: 0,
   },
   filterChipsRow: {
     flexDirection: 'row',
@@ -683,16 +768,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9fafb',
   },
   filterChipActive: {
-    backgroundColor: '#0f766e',
-    borderColor: '#0f766e',
+    backgroundColor: '#054653',
+    borderColor: '#054653',
   },
   filterChipText: {
     fontSize: 12,
     color: '#374151',
+    fontWeight: '700',
   },
   filterChipTextActive: {
     color: '#ffffff',
-    fontWeight: '600',
+    fontWeight: '900',
   },
   card: {
     borderRadius: 16,
@@ -720,12 +806,13 @@ const styles = StyleSheet.create({
   },
   employeeName: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
+    fontWeight: '900',
+    color: '#0f172a',
   },
   employeeMeta: {
     fontSize: 11,
     color: '#6b7280',
+    fontWeight: '600',
   },
   statusPill: {
     paddingHorizontal: 8,
@@ -803,22 +890,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: '#16a34a',
+    backgroundColor: '#054653',
   },
   approveButtonText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '900',
     color: '#ffffff',
   },
   rejectButton: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#fecaca',
   },
   rejectButtonText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '900',
     color: '#b91c1c',
   },
   emptyState: {
@@ -857,6 +946,7 @@ const styles = StyleSheet.create({
   pageButtonText: {
     fontSize: 12,
     color: '#111827',
+    fontWeight: '800',
   },
   pageButtonTextDisabled: {
     color: '#9ca3af',
@@ -864,6 +954,7 @@ const styles = StyleSheet.create({
   pageLabel: {
     fontSize: 12,
     color: '#6b7280',
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
@@ -936,6 +1027,65 @@ const styles = StyleSheet.create({
   modalDangerText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#ffffff',
+  },
+
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17,24,39,0.55)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  successCard: {
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  successIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  successIconWrapApprove: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#bbf7d0',
+  },
+  successIconWrapReject: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  successTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  successMessage: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  successButton: {
+    marginTop: 14,
+    borderRadius: 999,
+    backgroundColor: '#0f766e',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  successButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: '#ffffff',
   },
 });

@@ -21,6 +21,10 @@ export default function HrStaffDirectoryScreen() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'full' | 'associate'>('all');
   const [staff, setStaff] = useState<any[]>([]);
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(0); // 0-based
+  const [total, setTotal] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [departments, setDepartments] = useState<any[]>([]);
   const [viewTarget, setViewTarget] = useState<any | null>(null);
   const [editTarget, setEditTarget] = useState<any | null>(null);
@@ -52,15 +56,21 @@ export default function HrStaffDirectoryScreen() {
     try {
       setError(null);
       setLoading(true);
-      const [usersRes, deptRes] = await Promise.all([
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [Query.orderAsc('name'), Query.limit(500)]),
+      const [usersRes, deptRes, roleRes] = await Promise.all([
+        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
+          Query.orderAsc('name'),
+          Query.limit(PAGE_SIZE),
+          Query.offset(0),
+        ]),
         hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.DEPARTMENTS, [Query.orderAsc('name'), Query.limit(300)]),
+        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.ROLES, [Query.limit(500)]),
       ]);
       const docs = ((usersRes as any)?.documents ?? []) as any[];
+      setTotal((usersRes as any)?.total ?? docs.length);
+      setPage(0);
       setDepartments(((deptRes as any)?.documents ?? []) as any[]);
       const filtered = docs.filter((u) => !!u?.name || !!u?.email);
       setStaff(filtered);
-      const roleRes = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.ROLES, [Query.limit(500)]);
       setRoles(((roleRes as any)?.documents ?? []) as any[]);
       setSupervisors(filtered.filter((u) => String(u.staffCategory || '') === 'Full-Staff' && String(u.systemRole || '') !== 'None'));
     } catch (e: any) {
@@ -68,7 +78,37 @@ export default function HrStaffDirectoryScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user?.$id]);
+  }, [PAGE_SIZE, user?.$id]);
+
+  const hasMore = useMemo(() => {
+    if (total === null) return false;
+    return staff.length < total;
+  }, [staff.length, total]);
+
+  const loadMore = useCallback(async () => {
+    if (!user?.$id) return;
+    if (loadingMore) return;
+    if (total !== null && staff.length >= total) return;
+    try {
+      setLoadingMore(true);
+      setError(null);
+      const nextPage = page + 1;
+      const usersRes = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.USERS, [
+        Query.orderAsc('name'),
+        Query.limit(PAGE_SIZE),
+        Query.offset(nextPage * PAGE_SIZE),
+      ]);
+      const docs = ((usersRes as any)?.documents ?? []) as any[];
+      const filtered = docs.filter((u) => !!u?.name || !!u?.email);
+      setTotal((usersRes as any)?.total ?? total ?? filtered.length);
+      setPage(nextPage);
+      setStaff((prev) => [...prev, ...filtered]);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load more staff.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [PAGE_SIZE, loadingMore, page, staff.length, total, user?.$id]);
 
   useEffect(() => {
     if (!isLoading && user?.$id) loadStaff();
@@ -348,6 +388,16 @@ export default function HrStaffDirectoryScreen() {
                 </View>
               ))
             )}
+
+            {hasMore && !search.trim() && categoryFilter === 'all' ? (
+              <Pressable
+                style={[styles.retryBtn, { alignSelf: 'center', marginTop: 12 }, loadingMore && { opacity: 0.7 }]}
+                onPress={loadMore}
+                disabled={loadingMore}
+              >
+                <Text style={styles.retryText}>{loadingMore ? 'Loading…' : 'Load more'}</Text>
+              </Pressable>
+            ) : null}
           </View>
         )}
       </ScrollView>
