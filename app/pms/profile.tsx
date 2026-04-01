@@ -73,7 +73,7 @@ export default function PmsProfileScreen() {
     try {
       setSigningOut(true);
       await logout();
-      router.replace('/pms');
+      // Navigation reset is handled in app/pms/_layout.tsx when session ends.
     } finally {
       setSigningOut(false);
     }
