@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -11,7 +10,6 @@ import { HR_COLLECTIONS, HR_DB_ID, ID, Query, hrAccount, hrDatabases } from '@/l
 
 export default function HrStaffDirectoryScreen() {
   const { user, isLoading } = useHrAuth();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const canAddStaff = String(user?.systemRole || '').toLowerCase() === 'senior manager';
 

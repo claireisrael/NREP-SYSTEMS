@@ -17,7 +17,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import {
+  cacheDirectory,
+  documentDirectory,
+  EncodingType,
+  deleteAsync,
+  getInfoAsync,
+  readAsStringAsync,
+  writeAsStringAsync,
+} from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -204,9 +212,9 @@ export default function HrNewTravelRequestScreen() {
         }
       } catch (pdfErr: any) {
         // Some Expo Go / device setups can fail to render PDFs. Fall back to sharing HTML.
-        const base = (FileSystem.documentDirectory || FileSystem.cacheDirectory || '').toString();
+        const base = (documentDirectory || cacheDirectory || '').toString();
         const htmlPath = `${base}travel_request_${encodeURIComponent(submittedRequestId)}.html`;
-        await FileSystem.writeAsStringAsync(htmlPath, html, { encoding: FileSystem.EncodingType.UTF8 });
+        await writeAsStringAsync(htmlPath, html, { encoding: EncodingType.UTF8 });
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(htmlPath, {
             mimeType: 'text/html',
@@ -221,13 +229,12 @@ export default function HrNewTravelRequestScreen() {
     }
   }, [submittedRequestId]);
 
-  const fs: any = FileSystem as any;
   const draftPath = useMemo(() => {
-    const base = fs.documentDirectory || fs.cacheDirectory || '';
+    const base = documentDirectory || cacheDirectory || '';
     const id = user?.$id || 'anon';
     const suffix = editRequestId ? `_edit_${encodeURIComponent(editRequestId)}` : '';
     return `${base}travel_request_draft_${id}${suffix}.json`;
-  }, [editRequestId, fs, user?.$id]);
+  }, [editRequestId, user?.$id]);
 
   const saveDraftTimer = useRef<any>(null);
 
@@ -244,9 +251,9 @@ export default function HrNewTravelRequestScreen() {
       setApprovers(a);
 
       try {
-        const info = await FileSystem.getInfoAsync(draftPath);
+        const info = await getInfoAsync(draftPath);
         if (info.exists) {
-          const json = await FileSystem.readAsStringAsync(draftPath);
+          const json = await readAsStringAsync(draftPath);
           const parsed = JSON.parse(json);
           setFormData((prev) => ({ ...prev, ...parsed }));
         }
@@ -309,7 +316,7 @@ export default function HrNewTravelRequestScreen() {
     if (saveDraftTimer.current) clearTimeout(saveDraftTimer.current);
     saveDraftTimer.current = setTimeout(async () => {
       try {
-        await FileSystem.writeAsStringAsync(draftPath, JSON.stringify(formData), {
+        await writeAsStringAsync(draftPath, JSON.stringify(formData), {
           // leave encoding default to avoid type issues
         });
       } catch {
@@ -421,7 +428,7 @@ export default function HrNewTravelRequestScreen() {
           });
       setSubmitStage('Finalizing…');
       try {
-        await FileSystem.deleteAsync(draftPath, { idempotent: true });
+        await deleteAsync(draftPath, { idempotent: true });
       } catch {
         // ignore
       }

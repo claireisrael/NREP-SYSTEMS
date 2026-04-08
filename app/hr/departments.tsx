@@ -103,7 +103,11 @@ export default function HrDepartmentsScreen() {
   const loadDepartmentsPage = useCallback(
     async (nextPage: number, mode: 'replace' | 'append') => {
       try {
-        mode === 'append' ? setDeptLoadingMore(true) : setLoading(true);
+        if (mode === 'append') {
+          setDeptLoadingMore(true);
+        } else {
+          setLoading(true);
+        }
         setError(null);
         const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.DEPARTMENTS, [
           Query.orderAsc('name'),
@@ -118,7 +122,11 @@ export default function HrDepartmentsScreen() {
       } catch (e: any) {
         setError(e?.message || 'Failed to load departments.');
       } finally {
-        mode === 'append' ? setDeptLoadingMore(false) : setLoading(false);
+        if (mode === 'append') {
+          setDeptLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
       }
     },
     [DEPT_PAGE_SIZE]

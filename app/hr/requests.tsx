@@ -14,7 +14,6 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
 import { useHrAuth } from '@/context/HrAuthContext';
@@ -156,7 +155,11 @@ export default function HrRequestsScreen() {
     async (nextPage: number, mode: 'replace' | 'append') => {
       if (!user?.$id) return;
       try {
-        mode === 'append' ? setLoadingMore(true) : setLoading(true);
+        if (mode === 'append') {
+          setLoadingMore(true);
+        } else {
+          setLoading(true);
+        }
         setError(null);
 
         const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
@@ -174,7 +177,11 @@ export default function HrRequestsScreen() {
       } catch (e: any) {
         setError(e?.message || 'Failed to load requests');
       } finally {
-        mode === 'append' ? setLoadingMore(false) : setLoading(false);
+        if (mode === 'append') {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
       }
     },
     [user?.$id],
@@ -253,7 +260,6 @@ export default function HrRequestsScreen() {
     }
   };
 
-  const canApprove = approvalItems.length > 0;
   const hasAdminAccess = String(user.systemRole || '').toLowerCase() === 'senior manager';
   const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
     (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||

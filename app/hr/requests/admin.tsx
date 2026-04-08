@@ -23,6 +23,19 @@ import { HR_COLLECTIONS, HR_DB_ID, ID, hrDatabases, Query } from '@/lib/appwrite
 
 type TabKey = 'types' | 'categories' | 'approvers';
 
+const FALLBACK_REQUEST_TYPES = [
+  { typeCode: 'EQUIPMENT', typeName: 'Equipment' },
+  { typeCode: 'IT_SUPPORT', typeName: 'IT Support' },
+  { typeCode: 'FACILITY', typeName: 'Facility' },
+  { typeCode: 'HR_SERVICES', typeName: 'HR Services' },
+  { typeCode: 'ADMINISTRATIVE', typeName: 'Administrative' },
+  { typeCode: 'PROCUREMENT', typeName: 'Procurement' },
+  { typeCode: 'MAINTENANCE', typeName: 'Maintenance' },
+  { typeCode: 'TRAINING', typeName: 'Training' },
+  { typeCode: 'DOCUMENT_REQUEST', typeName: 'Document Request' },
+  { typeCode: 'CHANGE_REQUEST', typeName: 'Change Request' },
+] as const;
+
 export default function HrRequestsAdminScreen() {
   const { user, isLoading } = useHrAuth();
   const router = useRouter();
@@ -55,20 +68,8 @@ export default function HrRequestsAdminScreen() {
     categoriesId: '',
     approversId: '',
   });
-  const fallbackRequestTypes = [
-    { typeCode: 'EQUIPMENT', typeName: 'Equipment' },
-    { typeCode: 'IT_SUPPORT', typeName: 'IT Support' },
-    { typeCode: 'FACILITY', typeName: 'Facility' },
-    { typeCode: 'HR_SERVICES', typeName: 'HR Services' },
-    { typeCode: 'ADMINISTRATIVE', typeName: 'Administrative' },
-    { typeCode: 'PROCUREMENT', typeName: 'Procurement' },
-    { typeCode: 'MAINTENANCE', typeName: 'Maintenance' },
-    { typeCode: 'TRAINING', typeName: 'Training' },
-    { typeCode: 'DOCUMENT_REQUEST', typeName: 'Document Request' },
-    { typeCode: 'CHANGE_REQUEST', typeName: 'Change Request' },
-  ];
   const activeRequestTypes = useMemo(() => {
-    const source = (types.length ? types : fallbackRequestTypes).filter((t: any) => t?.isActive !== false);
+    const source = (types.length ? types : FALLBACK_REQUEST_TYPES).filter((t: any) => t?.isActive !== false);
     return source.sort((a: any, b: any) => Number(a?.sortOrder || 0) - Number(b?.sortOrder || 0));
   }, [types]);
 

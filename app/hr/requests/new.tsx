@@ -1376,7 +1376,7 @@ export default function HrRequestNewOrEdit() {
     return () => {
       cancelled = true;
     };
-  }, [request?.$id, request?.status, request?.requestCategory, request?.l1ApproverId, user?.$id]);
+  }, [request, request?.$id, request?.status, request?.requestCategory, request?.l1ApproverId, user?.$id]);
 
   const isCreateMode = !editId;
 

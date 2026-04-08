@@ -39,8 +39,6 @@ type Task = {
   dueDate?: string;
 };
 
-type StatusFilter = 'all' | 'planned' | 'active' | 'on_hold' | 'completed' | 'cancelled';
-
 const formatStatusLabel = (status?: string) => {
   if (!status) return '';
   return status

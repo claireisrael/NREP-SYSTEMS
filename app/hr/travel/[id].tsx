@@ -87,13 +87,13 @@ export default function HrTravelRequestDetailScreen() {
     setRejectModalOpen(true);
   };
 
-  const closeActionModals = () => {
+  const closeActionModals = useCallback(() => {
     if (acting) return;
     setApproveModalOpen(false);
     setRejectModalOpen(false);
     setActionStage(null);
     setActionComments('');
-  };
+  }, [acting]);
 
   const confirmApprove = useCallback(async () => {
     if (!parsed?.$id || !actionStage) return;
@@ -124,7 +124,7 @@ export default function HrTravelRequestDetailScreen() {
     } finally {
       setActing(false);
     }
-  }, [actionComments, actionStage, load, parsed?.$id, resolveActiveL2ApproverId]);
+  }, [actionComments, actionStage, closeActionModals, load, parsed?.$id, resolveActiveL2ApproverId]);
 
   const confirmReject = useCallback(async () => {
     if (!parsed?.$id || !actionStage || !user?.$id) return;
@@ -150,7 +150,7 @@ export default function HrTravelRequestDetailScreen() {
     } finally {
       setActing(false);
     }
-  }, [actionComments, actionStage, load, parsed?.$id, user?.$id]);
+  }, [actionComments, actionStage, closeActionModals, load, parsed?.$id, user?.$id]);
 
   const load = useCallback(async () => {
     if (!id) return;
