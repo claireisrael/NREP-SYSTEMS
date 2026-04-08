@@ -29,7 +29,7 @@ export default function HrForgotPasswordScreen() {
   const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const otpRefs = useRef<Array<TextInput | null>>([]);
+  const otpRefs = useRef<(TextInput | null)[]>([]);
 
   // Prefer the env var if provided; otherwise fall back to the deployed HR web domain.
   // The HR Next.js app is hosted at `https://hr.nrep.ug`.

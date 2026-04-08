@@ -864,7 +864,7 @@ function groupApprovalItems(items: any[]) {
     const k = String(r?.__queue || '').toLowerCase();
     if (k in by) by[k].push(r);
   });
-  const order: Array<keyof typeof by> = ['department', 'l1', 'l2', 'finance'];
+  const order: (keyof typeof by)[] = ['department', 'l1', 'l2', 'finance'];
   const labels: Record<string, string> = {
     department: 'Department Reviews',
     l1: 'L1 Approvals',

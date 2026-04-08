@@ -48,14 +48,14 @@ type FormData = {
   dateTimeFrom: string;
   dateTimeTo: string;
   currency: string;
-  expenseBreakdown: Array<{
+  expenseBreakdown: {
     id: string;
     purpose: string;
     description?: string;
     quantity: number;
     unitCost: number;
     subtotal: number;
-  }>;
+  }[];
   totalAmount: number;
   paymentMethod: '' | 'cash' | 'bank_transfer' | 'mobile_money' | 'cheque';
   bankDetails: null | { accountNumber: string; bankName: string; branch: string; swiftCode?: string };
@@ -85,10 +85,10 @@ export default function HrNewTravelRequestScreen() {
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [existingUploads, setExistingUploads] = useState<UploadedAttachment[]>([]);
 
-  const [projects, setProjects] = useState<Array<{ $id: string; name?: string | null; projectID?: string | null }>>(
+  const [projects, setProjects] = useState<{ $id: string; name?: string | null; projectID?: string | null }[]>(
     [],
   );
-  const [approvers, setApprovers] = useState<Array<{ userId: string; name: string; department?: string | null }>>(
+  const [approvers, setApprovers] = useState<{ userId: string; name: string; department?: string | null }[]>(
     [],
   );
 
@@ -674,8 +674,8 @@ function TripDetailsStep({
   onChange,
 }: {
   data: FormData;
-  projects: Array<{ $id: string; name?: string | null; projectID?: string | null }>;
-  approvers: Array<{ userId: string; name: string; department?: string | null }>;
+  projects: { $id: string; name?: string | null; projectID?: string | null }[];
+  approvers: { userId: string; name: string; department?: string | null }[];
   onChange: React.Dispatch<React.SetStateAction<FormData>>;
 }) {
   const [projectModal, setProjectModal] = useState(false);
@@ -1358,7 +1358,7 @@ function SelectModal({
   title: string;
   visible: boolean;
   onClose: () => void;
-  items: Array<{ key: string; label: string; onPress: () => void }>;
+  items: { key: string; label: string; onPress: () => void }[];
 }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -1462,7 +1462,7 @@ function validateStep(step: number, data: FormData): string | null {
 }
 
 function projectLabel(
-  projects: Array<{ $id: string; name?: string | null; projectID?: string | null }>,
+  projects: { $id: string; name?: string | null; projectID?: string | null }[],
   projectId: string,
   projectName: string,
 ) {
@@ -1471,7 +1471,7 @@ function projectLabel(
   return p ? `${p.name || 'Project'}${p.projectID ? ` (${p.projectID})` : ''}` : projectName || projectId;
 }
 
-function approverLabel(list: Array<{ userId: string; name: string; department?: string | null }>, id: string) {
+function approverLabel(list: { userId: string; name: string; department?: string | null }[], id: string) {
   const a = list.find((x) => x.userId === id);
   return a ? `${a.name}${a.department ? ` (${a.department})` : ''}` : id;
 }

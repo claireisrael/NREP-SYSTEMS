@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
