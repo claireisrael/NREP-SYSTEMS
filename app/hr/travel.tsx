@@ -32,9 +32,11 @@ export default function HrTravelScreen() {
     (!!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId) ||
     String((user as any)?.departmentName || '').toLowerCase().includes('finance') ||
     String((user as any)?.systemRole || '').toLowerCase().includes('finance');
-  const canApprove =
-    user?.systemRole === 'Senior Manager' || user?.systemRole === 'Supervisor' || isFinanceUser;
-  const hasAdminAccess = user?.systemRole === 'Senior Manager';
+  const systemRoleLower = String((user as any)?.systemRole || '').trim().toLowerCase();
+  const isSeniorManager = systemRoleLower === 'senior manager' || systemRoleLower === 'senior admin';
+  const isSupervisor = systemRoleLower === 'supervisor';
+  const canApprove = isSeniorManager || isSupervisor || isFinanceUser;
+  const hasAdminAccess = isSeniorManager;
   const [activeTab, setActiveTab] = useState<'my' | 'approvals'>('my');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>(
     'all',
@@ -112,13 +114,8 @@ export default function HrTravelScreen() {
           ? withTimeout(
               hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
                 // Web parity: finance queue items are those that finished SM/L2 and are awaiting finance completion.
-                // Some environments use different status strings; include both to avoid missing items.
-                Query.or([
-                  Query.equal('status', 'pending_finance'),
-                  Query.equal('status', 'PENDING_FINANCE'),
-                  Query.equal('status', 'l2_approved'),
-                  Query.equal('status', 'L2_APPROVED'),
-                ]),
+                // Status is an enum; finance queue is driven by L2 approval.
+                Query.or([Query.equal('status', 'l2_approved'), Query.equal('status', 'L2_APPROVED')]),
                 Query.orderDesc('l2ApprovalDate'),
                 Query.limit(100),
               ]),
@@ -159,7 +156,7 @@ export default function HrTravelScreen() {
   const myStats = useMemo(() => {
     const total = myRequests.length;
       const pending = myRequests.filter((r) =>
-        ['pending', 'l1_approved', 'pending_finance'].includes(String(r.status || '').toLowerCase()),
+        ['pending', 'l1_approved', 'l2_approved'].includes(String(r.status || '').toLowerCase()),
       ).length;
     const approved = myRequests.filter((r) =>
       ['l2_approved', 'completed'].includes(String(r.status || '').toLowerCase()),
@@ -230,7 +227,7 @@ export default function HrTravelScreen() {
       const status = String(t.status || '').toLowerCase();
       if (stage === 'l1') return String(t.l1ApproverId || '') === String(user.$id) && status === 'pending';
       if (stage === 'l2') return String(t.l2ApproverId || '') === String(user.$id) && status === 'l1_approved';
-      return isFinanceUser && ['pending_finance', 'l2_approved'].includes(status);
+      return isFinanceUser && status === 'l2_approved';
     },
     [user?.$id, isFinanceUser],
   );
@@ -286,7 +283,7 @@ export default function HrTravelScreen() {
         update.l2ApproverId = l2Id;
       } else if (approveStage === 'l2') {
         // After SM/L2 approval, the request should wait for Finance completion.
-        update.status = 'pending_finance';
+        update.status = 'l2_approved';
         update.l2ApprovalDate = now;
         update.l2Comments = approveComments.trim() || null;
       } else {
@@ -899,7 +896,7 @@ function badgeLabel(status?: string) {
   const s = (status || '').toLowerCase();
   if (s === 'pending') return 'PENDING L1';
   if (s === 'l1_approved') return 'PENDING L2';
-  if (s === 'pending_finance' || s === 'l2_approved') return 'PENDING FINANCE';
+  if (s === 'l2_approved') return 'PENDING FINANCE';
   if (s === 'rejected') return 'REJECTED';
   if (s === 'completed') return 'COMPLETED';
   return (status || 'STATUS').toUpperCase();
@@ -910,7 +907,7 @@ function badgeStyle(status?: string) {
   if (s === 'rejected') {
     return { pill: { backgroundColor: '#fef2f2' }, text: { color: '#b91c1c' } };
   }
-  if (s === 'pending_finance' || s === 'l2_approved') {
+  if (s === 'l2_approved') {
     return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
   }
   if (s === 'l1_approved') {

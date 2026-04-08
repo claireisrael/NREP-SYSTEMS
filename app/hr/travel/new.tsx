@@ -191,15 +191,30 @@ export default function HrNewTravelRequestScreen() {
   </body>
 </html>`;
 
-      const file = await Print.printToFileAsync({ html });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(file.uri, {
-          UTI: 'com.adobe.pdf',
-          mimeType: 'application/pdf',
-          dialogTitle: `Travel Request ${submittedRequestId}`,
-        } as any);
-      } else {
-        Alert.alert('Saved', `PDF generated at:\n${file.uri}`);
+      try {
+        const file = await Print.printToFileAsync({ html });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(file.uri, {
+            UTI: 'com.adobe.pdf',
+            mimeType: 'application/pdf',
+            dialogTitle: `Travel Request ${submittedRequestId}`,
+          } as any);
+        } else {
+          Alert.alert('Saved', `PDF generated at:\n${file.uri}`);
+        }
+      } catch (pdfErr: any) {
+        // Some Expo Go / device setups can fail to render PDFs. Fall back to sharing HTML.
+        const base = (FileSystem.documentDirectory || FileSystem.cacheDirectory || '').toString();
+        const htmlPath = `${base}travel_request_${encodeURIComponent(submittedRequestId)}.html`;
+        await FileSystem.writeAsStringAsync(htmlPath, html, { encoding: FileSystem.EncodingType.UTF8 });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(htmlPath, {
+            mimeType: 'text/html',
+            dialogTitle: `Travel Request ${submittedRequestId}`,
+          } as any);
+        } else {
+          Alert.alert('Saved', `File generated at:\n${htmlPath}\n\nPDF export failed: ${pdfErr?.message || 'Unknown error'}`);
+        }
       }
     } catch (e: any) {
       Alert.alert('Download failed', e?.message || 'Unable to download this request.');

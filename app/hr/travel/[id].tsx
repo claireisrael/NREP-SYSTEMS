@@ -53,7 +53,7 @@ export default function HrTravelRequestDetailScreen() {
     return {
       l1: String(parsed.l1ApproverId || '') === myId && status === 'pending',
       l2: String(parsed.l2ApproverId || '') === myId && status === 'l1_approved',
-      finance: isFinanceUser && ['pending_finance', 'l2_approved'].includes(status),
+      finance: isFinanceUser && status === 'l2_approved',
     };
   }, [parsed, user?.$id, isFinanceUser]);
 
@@ -108,7 +108,7 @@ export default function HrTravelRequestDetailScreen() {
         update.l1Comments = actionComments.trim() || null;
         update.l2ApproverId = l2Id;
       } else if (actionStage === 'l2') {
-        update.status = 'pending_finance';
+        update.status = 'l2_approved';
         update.l2ApprovalDate = now;
         update.l2Comments = actionComments.trim() || null;
       } else {
@@ -577,7 +577,7 @@ function statusLabel(status: any) {
   const s = String(status || '').toLowerCase();
   if (s === 'pending') return 'Pending L1 Approval';
   if (s === 'l1_approved') return 'Pending L2 Approval';
-  if (s === 'pending_finance' || s === 'l2_approved') return 'Pending Finance';
+  if (s === 'l2_approved') return 'Pending Finance';
   if (s === 'rejected') return 'Rejected';
   if (s === 'completed') return 'Completed';
   return status ? String(status) : '—';
@@ -586,7 +586,7 @@ function statusLabel(status: any) {
 function statusPillStyle(status: any) {
   const s = String(status || '').toLowerCase();
   if (s === 'rejected') return { pill: { backgroundColor: '#fef2f2' }, text: { color: '#b91c1c' } };
-  if (s === 'pending_finance' || s === 'l2_approved') return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
+  if (s === 'l2_approved') return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
   if (s === 'l1_approved') return { pill: { backgroundColor: '#eff6ff' }, text: { color: '#1d4ed8' } };
   if (s === 'completed') return { pill: { backgroundColor: '#f5f3ff' }, text: { color: '#5b21b6' } };
   return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
