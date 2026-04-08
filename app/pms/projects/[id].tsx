@@ -12,10 +12,7 @@ import {
   View,
   Platform,
 } from 'react-native';
-// DateTimePicker is provided by @react-native-community/datetimepicker – install via:
-// npx expo install @react-native-community/datetimepicker
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const DateTimePicker = require('@react-native-community/datetimepicker').default;
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -128,7 +125,7 @@ export default function PmsProjectDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high' | 'critical'>('all');
+  const priorityFilter: 'all' | 'low' | 'medium' | 'high' | 'critical' = 'all';
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [activeTab, setActiveTab] = useState<'overview' | 'team' | 'tasks' | 'activity'>('tasks');
   const [team, setTeam] = useState<TeamMember[]>([]);
@@ -252,7 +249,7 @@ export default function PmsProjectDetailScreen() {
     };
 
     load();
-  }, [id, user]);
+  }, [id, user, router]);
 
   const loadTeam = useCallback(async () => {
     if (!id) return;
@@ -713,7 +710,7 @@ export default function PmsProjectDetailScreen() {
 
   useEffect(() => {
     setTasksPage(0);
-  }, [search, priorityFilter]);
+  }, [search]);
 
   const pagedTasks = useMemo(() => {
     const take = (tasksPage + 1) * PAGE_SIZE;
