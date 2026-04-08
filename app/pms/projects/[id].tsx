@@ -1530,7 +1530,6 @@ export default function PmsProjectDetailScreen() {
                         </View>
                       ) : (
                         filteredMilestones.map((m) => {
-                          const hasDates = m.startDate || m.dueDate;
                           const due = m.dueDate ? new Date(m.dueDate) : null;
                           const isOverdue =
                             !!due &&

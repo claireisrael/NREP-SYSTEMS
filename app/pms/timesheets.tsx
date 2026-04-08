@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
@@ -12,9 +12,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useThemeColor } from '@/hooks/use-theme-color';
 import { PmsBottomNav } from '@/components/PmsBottomNav';
 import { useAuth } from '@/context/AuthContext';
 
@@ -48,9 +46,7 @@ export default function PmsTimesheetsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
-  const textColor = useThemeColor({}, 'text');
-
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     try {
       if (!user?.authUser?.$id || !user.organizationId) return;
 
@@ -79,11 +75,11 @@ export default function PmsTimesheetsScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.authUser?.$id, user?.organizationId]);
 
   useEffect(() => {
     loadDashboard();
-  }, [user?.authUser?.$id, user?.organizationId]);
+  }, [loadDashboard]);
 
   const getWeekStartISO = () => {
     const today = new Date();
@@ -368,7 +364,6 @@ export default function PmsTimesheetsScreen() {
   const renderQuickActions = () => {
     if (!user) return null;
 
-    const isAdminOrSupervisor = user.isAdmin || user.isSupervisor;
     const canViewTeam = user.isAdmin || user.isSupervisor || user.isFinance;
 
     const handleReports = () => {
