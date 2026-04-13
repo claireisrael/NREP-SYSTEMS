@@ -168,7 +168,7 @@ export default function HrRequestsScreen() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [PAGE_SIZE, user, user?.$id, user?.departmentName, user?.systemRole]);
+  }, [PAGE_SIZE, user]);
 
   const loadPage = useCallback(
     async (nextPage: number, mode: 'replace' | 'append') => {

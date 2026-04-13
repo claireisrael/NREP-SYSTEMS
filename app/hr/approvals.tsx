@@ -174,7 +174,7 @@ export default function HrApprovalsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user?.$id, isFinanceUser, isSeniorManager, canViewCompleted]);
+  }, [user?.$id, isFinanceUser, canViewCompleted]);
 
   useEffect(() => {
     if (!isLoading && user?.$id && canApprove) {
