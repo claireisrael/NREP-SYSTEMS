@@ -200,7 +200,7 @@ export default function HrRequestDetailScreen() {
       : stage === 'DEPARTMENT_REVIEW' ? 'Department Review'
       : stage === 'L1_APPROVAL' ? 'L1 Approval'
       : stage === 'L2_APPROVAL' ? 'L2 Approval'
-      : stage === 'FINANCE_COMPLETION' ? 'Finance Completion'
+      : stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING' ? 'Finance Completion'
       : status === 'APPROVED' ? 'Completed'
       : status || 'Status';
     return { status, stage, title, requestId, when, stageLabel };
@@ -216,11 +216,15 @@ export default function HrRequestDetailScreen() {
     if (stage === 'DEPARTMENT_REVIEW') return String(doc.departmentReviewerId || '') === String(me);
     if (stage === 'L1_APPROVAL') return String(doc.l1ApproverId || '') === String(me);
     if (stage === 'L2_APPROVAL') return String(doc.l2ApproverId || '') === String(me);
-    if (stage === 'FINANCE_COMPLETION') {
+    if (stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING') {
       const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
         (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
         '') as string;
-      return !!financeDeptId && String((user as any).departmentId || '') === financeDeptId;
+      return (
+        (!!financeDeptId && String((user as any).departmentId || '') === financeDeptId) ||
+        String((user as any)?.departmentName || '').toLowerCase().includes('finance') ||
+        String((user as any)?.systemRole || '').toLowerCase().includes('finance')
+      );
     }
     return false;
   }, [doc, user]);
@@ -230,7 +234,7 @@ export default function HrRequestDetailScreen() {
     if (stage === 'DEPARTMENT_REVIEW') return 'department';
     if (stage === 'L1_APPROVAL') return 'l1';
     if (stage === 'L2_APPROVAL') return 'l2';
-    if (stage === 'FINANCE_COMPLETION') return 'finance';
+    if (stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING') return 'finance';
     return null;
   }, [doc?.approvalStage]);
 
@@ -246,6 +250,38 @@ export default function HrRequestDetailScreen() {
       .filter((a) => String(a.userId || '') !== owner)
       .filter((a) => String(a.userId || '') !== me);
   }, [approvalStage, approvers, doc?.userId, user]);
+
+  const resolveDefaultL2ApproverId = useCallback(async () => {
+    const deptId = String(doc?.departmentId || '').trim();
+    const requesterId = String(doc?.userId || '');
+    const meId = String(user?.$id || (user as any)?.userId || '');
+
+    const tryPick = (docs: any[]) => {
+      const picked = docs
+        .map((d) => String(d?.userId || '').trim())
+        .filter(Boolean)
+        .find((uid) => uid !== requesterId && uid !== meId);
+      return picked || '';
+    };
+
+    // Web parity: L2 is determined by active approver mapping for the requester's department.
+    try {
+      if (HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS) {
+        const queries: any[] = [Query.equal('isActive', true), Query.equal('level', 'L2'), Query.limit(50)];
+        if (deptId) queries.push(Query.equal('departmentId', deptId));
+        const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS as any, queries);
+        const picked = tryPick(((res as any)?.documents ?? []) as any[]);
+        if (picked) return picked;
+      }
+    } catch {
+      // fall through
+    }
+
+    // Fallback: any L2 from the preloaded list.
+    const pickedFallback = tryPick(filteredApprovers);
+    if (!pickedFallback) throw new Error('No eligible Level 2 approver found. Admin setup required.');
+    return pickedFallback;
+  }, [doc?.departmentId, doc?.userId, filteredApprovers, user]);
 
   const openApprove = () => {
     setApproveSelectedUserId('');
@@ -280,20 +316,23 @@ export default function HrRequestDetailScreen() {
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, doc.$id, {
           status: 'DEPT_APPROVED',
           approvalStage: 'L1_APPROVAL',
+          currentStage: 'L1_APPROVAL',
           departmentReviewDate: now,
           departmentReviewComments: approveComments || '',
           l1ApproverId: approveSelectedUserId,
           l1ApproverName: l1?.approverName || l1?.name || null,
         });
       } else if (approvalStage === 'l1') {
-        if (!approveSelectedUserId) throw new Error('Select an L2 approver to continue.');
-        const l2 = approvers.find((a) => String(a.userId) === String(approveSelectedUserId));
+        const l2UserId = approveSelectedUserId || (await resolveDefaultL2ApproverId());
+        if (!approveSelectedUserId) setApproveSelectedUserId(String(l2UserId));
+        const l2 = approvers.find((a) => String(a.userId) === String(l2UserId));
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, doc.$id, {
           status: 'L1_APPROVED',
           approvalStage: 'L2_APPROVAL',
+          currentStage: 'L2_APPROVAL',
           l1ApprovalDate: now,
           l1Comments: approveComments || '',
-          l2ApproverId: approveSelectedUserId,
+          l2ApproverId: String(l2UserId),
           l2ApproverName: l2?.approverName || l2?.name || null,
         });
       } else if (approvalStage === 'l2') {
@@ -301,6 +340,7 @@ export default function HrRequestDetailScreen() {
           await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, doc.$id, {
             status: 'PENDING',
             approvalStage: 'FINANCE_COMPLETION',
+            currentStage: 'PROCESSING',
             financeRequired: true,
             l2ApprovalDate: now,
             l2Comments: approveComments || '',
@@ -309,6 +349,7 @@ export default function HrRequestDetailScreen() {
           await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, doc.$id, {
             status: 'APPROVED',
             approvalStage: 'COMPLETED',
+            currentStage: 'COMPLETION',
             financeRequired: false,
             l2ApprovalDate: now,
             l2Comments: approveComments || '',
@@ -322,6 +363,7 @@ export default function HrRequestDetailScreen() {
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, doc.$id, {
           status: 'APPROVED',
           approvalStage: 'COMPLETED',
+          currentStage: 'COMPLETION',
           financeRequired: false,
           financeCompletionNotes: approveComments || '',
           completedBy: meId,
@@ -620,16 +662,16 @@ export default function HrRequestDetailScreen() {
               {approvalStage === 'department'
                 ? 'Select an L1 approver and optionally add comments.'
                 : approvalStage === 'l1'
-                  ? 'Select an L2 approver and optionally add comments.'
+                  ? 'This approves Level 1 and forwards to Level 2.'
                   : approvalStage === 'l2'
                     ? 'Finalize approval or send to Finance.'
                     : 'Complete this request as Finance.'}
             </Text>
 
-            {(approvalStage === 'department' || approvalStage === 'l1') ? (
+            {approvalStage === 'department' ? (
               <View style={{ marginTop: 12 }}>
                 <Text style={styles.modalLabel}>
-                  {approvalStage === 'department' ? 'Select L1 Approver' : 'Select L2 Approver'} *
+                  Select L1 Approver *
                 </Text>
                 <View style={styles.selectList}>
                   {filteredApprovers.slice(0, 40).map((a) => (
@@ -698,7 +740,7 @@ export default function HrRequestDetailScreen() {
               </Pressable>
               <Pressable
                 onPress={performApprove}
-                disabled={approving || ((approvalStage === 'department' || approvalStage === 'l1') && !approveSelectedUserId)}
+                disabled={approving || (approvalStage === 'department' && !approveSelectedUserId)}
                 style={[styles.confirmBtn, { backgroundColor: '#047857' }, approving && { opacity: 0.7 }]}
               >
                 {approving ? (
@@ -779,9 +821,10 @@ function RowLine({ label, value }: { label: string; value: string }) {
 function stagePillStyle(summary: { status: string; stage: string }) {
   if (summary.status === 'REJECTED') return { pill: { backgroundColor: '#fef2f2' }, text: { color: '#b91c1c' } };
   if (summary.status === 'DRAFT') return { pill: { backgroundColor: '#f3f4f6' }, text: { color: '#6b7280' } };
-  if (summary.status === 'APPROVED' || summary.stage === 'COMPLETED')
+  if (summary.status === 'APPROVED' || summary.stage === 'COMPLETED' || summary.stage === 'COMPLETION')
     return { pill: { backgroundColor: '#ecfdf5' }, text: { color: '#047857' } };
-  if (summary.stage === 'FINANCE_COMPLETION') return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
+  if (summary.stage === 'FINANCE_COMPLETION' || summary.stage === 'PROCESSING')
+    return { pill: { backgroundColor: '#fff7ed' }, text: { color: '#92400e' } };
   return { pill: { backgroundColor: '#eff6ff' }, text: { color: '#1d4ed8' } };
 }
 

@@ -53,7 +53,10 @@ export default function HrApprovalsScreen() {
   const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
     (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
     '') as string;
-  const isFinanceUser = !!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId;
+  const isFinanceUser =
+    (!!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId) ||
+    String((user as any)?.departmentName || '').toLowerCase().includes('finance') ||
+    String(user?.systemRole || '').toLowerCase().includes('finance');
   const isSeniorManager = String(user?.systemRole || '').toLowerCase() === 'senior manager';
   const isSupervisor = String(user?.systemRole || '').toLowerCase() === 'supervisor';
   const canApprove = isSeniorManager || isSupervisor || isFinanceUser;
@@ -84,11 +87,17 @@ export default function HrApprovalsScreen() {
           Query.orderDesc('submissionDate'),
           Query.limit(100),
         ]),
-        isFinanceUser || isSeniorManager
+        isFinanceUser
           ? hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-              Query.equal('approvalStage', 'FINANCE_COMPLETION'),
+              // Web parity / backward compatibility:
+              // Some records may not have approvalStage set, but may indicate finance via currentStage/financeRequired.
+              Query.or([
+                Query.equal('approvalStage', 'FINANCE_COMPLETION'),
+                Query.equal('currentStage', 'PROCESSING'),
+                Query.equal('financeRequired', true),
+              ]),
               Query.orderDesc('submissionDate'),
-              Query.limit(100),
+              Query.limit(200),
             ])
           : Promise.resolve({ documents: [] } as any),
         HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS
@@ -123,11 +132,20 @@ export default function HrApprovalsScreen() {
           : Promise.resolve({ documents: [] } as any),
       ]);
 
+      const financeDocsRaw = (((finance as any)?.documents ?? []) as any[]).filter((d) => {
+        const status = String(d?.status || '').toUpperCase();
+        const stage = String(d?.approvalStage || d?.currentStage || '').toUpperCase();
+        const financeRequired = d?.financeRequired === true;
+        const isFinanceStage = stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING' || financeRequired;
+        const isDone = status === 'APPROVED' || status === 'COMPLETED' || stage === 'COMPLETED' || stage === 'COMPLETION';
+        return isFinanceStage && !isDone;
+      });
+
       const approvals = [
         ...(((dept as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'department' })),
         ...(((l1 as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'l1' })),
         ...(((l2 as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'l2' })),
-        ...(((finance as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'finance' })),
+        ...financeDocsRaw.map((d) => ({ ...d, __queue: 'finance' })),
       ].sort((a: any, b: any) => {
         const ad = new Date(a.submissionDate || a.$createdAt || 0).getTime();
         const bd = new Date(b.submissionDate || b.$createdAt || 0).getTime();
@@ -220,6 +238,42 @@ export default function HrApprovalsScreen() {
     setRejectReason('');
   };
 
+  const resolveDefaultL2ApproverId = useCallback(
+    async (requestDoc: any) => {
+      const requesterId = String(requestDoc?.userId || '');
+      const deptId = String(requestDoc?.departmentId || '').trim();
+      const meId = String(user?.$id || '');
+
+      const tryPick = (docs: any[]) => {
+        const picked = docs
+          .map((d) => String(d?.userId || '').trim())
+          .filter(Boolean)
+          .find((uid) => uid !== requesterId && uid !== meId);
+        return picked || '';
+      };
+
+      // Web parity: choose L2 based on department, if configured.
+      try {
+        if (HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS) {
+          const queries: any[] = [Query.equal('isActive', true), Query.equal('level', 'L2'), Query.limit(50)];
+          if (deptId) queries.push(Query.equal('departmentId', deptId));
+          const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS as any, queries);
+          const picked = tryPick(((res as any)?.documents ?? []) as any[]);
+          if (picked) return picked;
+        }
+      } catch {
+        // fall through
+      }
+
+      // Fallback: use any active L2 from the preloaded list.
+      const fallbackDocs = (approvers || []).filter((a) => String(a.level || '').toUpperCase() === 'L2');
+      const pickedFallback = tryPick(fallbackDocs);
+      if (!pickedFallback) throw new Error('No eligible Level 2 approver found. Admin setup required.');
+      return pickedFallback;
+    },
+    [approvers, user?.$id],
+  );
+
   const performApprove = async () => {
     if (!approveTarget?.$id || !approveStage || !user?.$id) return;
     if (!canApproveRequest(approveTarget, user, financeDeptId)) {
@@ -238,20 +292,23 @@ export default function HrApprovalsScreen() {
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
           status: 'DEPT_APPROVED',
           approvalStage: 'L1_APPROVAL',
+          currentStage: 'L1_APPROVAL',
           departmentReviewDate: now,
           departmentReviewComments: approveComments || '',
           l1ApproverId: approveSelectedUserId,
           l1ApproverName: l1?.approverName || l1?.name || null,
         });
       } else if (approveStage === 'l1') {
-        if (!approveSelectedUserId) throw new Error('Select an L2 approver to continue.');
-        const l2 = approvers.find((a) => String(a.userId) === String(approveSelectedUserId));
+        const l2UserId = approveSelectedUserId || (await resolveDefaultL2ApproverId(approveTarget));
+        if (!approveSelectedUserId) setApproveSelectedUserId(String(l2UserId));
+        const l2 = approvers.find((a) => String(a.userId) === String(l2UserId));
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
           status: 'L1_APPROVED',
           approvalStage: 'L2_APPROVAL',
+          currentStage: 'L2_APPROVAL',
           l1ApprovalDate: now,
           l1Comments: approveComments || '',
-          l2ApproverId: approveSelectedUserId,
+          l2ApproverId: String(l2UserId),
           l2ApproverName: l2?.approverName || l2?.name || null,
         });
       } else if (approveStage === 'l2') {
@@ -259,6 +316,7 @@ export default function HrApprovalsScreen() {
           await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
             status: 'PENDING',
             approvalStage: 'FINANCE_COMPLETION',
+            currentStage: 'PROCESSING',
             financeRequired: true,
             l2ApprovalDate: now,
             l2Comments: approveComments || '',
@@ -267,6 +325,7 @@ export default function HrApprovalsScreen() {
           await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
             status: 'APPROVED',
             approvalStage: 'COMPLETED',
+            currentStage: 'COMPLETION',
             financeRequired: false,
             l2ApprovalDate: now,
             l2Comments: approveComments || '',
@@ -280,6 +339,7 @@ export default function HrApprovalsScreen() {
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
           status: 'APPROVED',
           approvalStage: 'COMPLETED',
+          currentStage: 'COMPLETION',
           financeRequired: false,
           financeCompletionNotes: approveComments || '',
           completedBy: meId,
@@ -678,16 +738,16 @@ export default function HrApprovalsScreen() {
               {approveStage === 'department'
                 ? 'Select an L1 approver and optionally add comments.'
                 : approveStage === 'l1'
-                  ? 'Select an L2 approver and optionally add comments.'
+                  ? 'This approves Level 1 and forwards to Level 2.'
                   : approveStage === 'l2'
                     ? 'Finalize approval or send to Finance.'
                     : 'Complete this request as Finance.'}
             </Text>
 
-            {(approveStage === 'department' || approveStage === 'l1') ? (
+            {approveStage === 'department' ? (
               <View style={{ marginTop: 12 }}>
                 <Text style={styles.modalLabel}>
-                  {approveStage === 'department' ? 'Select L1 Approver' : 'Select L2 Approver'}
+                  Select L1 Approver
                 </Text>
                 <View style={styles.selectList}>
                   {(approveStage === 'department'
@@ -843,12 +903,12 @@ const SECTION_ICON: Record<string, keyof typeof MaterialCommunityIcons.glyphMap>
 };
 
 function stageLabel(r: any) {
-  const stage = String(r?.approvalStage || '').toUpperCase();
+  const stage = String(r?.approvalStage || r?.currentStage || '').toUpperCase();
   if (stage === 'DEPARTMENT_REVIEW') return 'Department Review';
   if (stage === 'L1_APPROVAL') return 'L1 Approval';
   if (stage === 'L2_APPROVAL') return 'L2 Final Approval';
-  if (stage === 'FINANCE_COMPLETION') return 'Finance Completion';
-  if (stage === 'COMPLETED') return 'Completed';
+  if (stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING') return 'Finance Completion';
+  if (stage === 'COMPLETED' || stage === 'COMPLETION') return 'Completed';
   const status = String(r?.status || '').toUpperCase();
   return status || 'Pending';
 }

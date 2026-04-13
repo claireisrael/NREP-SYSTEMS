@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRootNavigationState, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -70,6 +70,8 @@ function isUnauthorizedAppwriteError(err: unknown): boolean {
 export default function HrHomeScreen() {
   const { user, isLoading, isLoggingOut, refreshProfile, logout } = useHrAuth();
   const router = useRouter();
+  const rootNavState = useRootNavigationState();
+  const navReady = !!rootNavState?.key;
   const insets = useSafeAreaInsets();
   const greeting = getGreeting();
   const firstName = getFirstName(user?.name, user?.email);
@@ -100,10 +102,9 @@ export default function HrHomeScreen() {
   }, [logout, router]);
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.replace('/hr');
-    }
-  }, [isLoading, user, router]);
+    if (!navReady) return;
+    if (!isLoading && !user) router.replace('/hr');
+  }, [isLoading, navReady, user, router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -123,17 +124,24 @@ export default function HrHomeScreen() {
     try {
       // Clear session and local state first; then navigate so nothing hits Appwrite with a half-dead session.
       await logout();
-      router.replace('/hr');
     } catch {
-      router.replace('/hr');
+      // ignore
     } finally {
+      // Navigation must only happen after the root navigator mounts, otherwise expo-router throws.
+      const go = () => router.replace('/hr');
+      if (navReady) {
+        InteractionManager.runAfterInteractions(go);
+      } else {
+        // Best-effort: schedule once the navigation tree is ready.
+        setTimeout(go, 0);
+      }
       // Clear overlay after navigation has committed — avoids dashboard ↔ login flicker.
       InteractionManager.runAfterInteractions(() => {
         signingOutRef.current = false;
         setSigningOut(false);
       });
     }
-  }, [logout, router, signingOut, isLoggingOut]);
+  }, [logout, router, signingOut, isLoggingOut, navReady]);
 
   const handleOpenNrepSite = useCallback(async () => {
     try {
