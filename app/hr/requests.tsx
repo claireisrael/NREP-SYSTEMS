@@ -168,7 +168,7 @@ export default function HrRequestsScreen() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [PAGE_SIZE, user?.$id, user?.departmentName, user?.systemRole]);
+  }, [PAGE_SIZE, user, user?.$id, user?.departmentName, user?.systemRole]);
 
   const loadPage = useCallback(
     async (nextPage: number, mode: 'replace' | 'append') => {
@@ -333,41 +333,38 @@ export default function HrRequestsScreen() {
     setRejectReason('');
   };
 
-  const resolveDefaultL2ApproverId = useCallback(
-    async (requestDoc: any) => {
-      const deptId = String(requestDoc?.departmentId || '').trim();
-      const requesterId = String(requestDoc?.userId || '');
-      const meId = String(user?.$id || '');
+  const resolveDefaultL2ApproverId = async (requestDoc: any) => {
+    const deptId = String(requestDoc?.departmentId || '').trim();
+    const requesterId = String(requestDoc?.userId || '');
+    const meId = String(user?.$id || '');
 
-      const tryPick = (docs: any[]) => {
-        const picked = docs
-          .map((d) => String(d?.userId || '').trim())
-          .filter(Boolean)
-          .find((uid) => uid !== requesterId && uid !== meId);
-        return picked || '';
-      };
+    const tryPick = (docs: any[]) => {
+      const picked = docs
+        .map((d) => String(d?.userId || '').trim())
+        .filter(Boolean)
+        .find((uid) => uid !== requesterId && uid !== meId);
+      return picked || '';
+    };
 
-      // Web parity: choose L2 from active approver mapping for the department.
-      try {
-        if (HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS) {
-          const queries: any[] = [Query.equal('isActive', true), Query.equal('level', 'L2'), Query.limit(50)];
-          if (deptId) queries.push(Query.equal('departmentId', deptId));
-          const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS as any, queries);
-          const picked = tryPick(((res as any)?.documents ?? []) as any[]);
-          if (picked) return picked;
-        }
-      } catch {
-        // fall through
+    // Web parity: choose L2 from active approver mapping for the department.
+    try {
+      if (HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS) {
+        const queries: any[] = [Query.equal('isActive', true), Query.equal('level', 'L2'), Query.limit(50)];
+        if (deptId) queries.push(Query.equal('departmentId', deptId));
+        const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS as any, queries);
+        const picked = tryPick(((res as any)?.documents ?? []) as any[]);
+        if (picked) return picked;
       }
+    } catch {
+      // fall through
+    }
 
-      // Fallback: any L2 from the preloaded list.
-      const fallbackDocs = (approvers || []).filter((a) => String(a.level || '').toUpperCase() === 'L2');
-      const pickedFallback = tryPick(fallbackDocs);
-      if (!pickedFallback) throw new Error('No eligible Level 2 approver found. Admin setup required.');
-      return pickedFallback;
-    },
-    [approvers, user?.$id],
-  );
+    // Fallback: any L2 from the preloaded list.
+    const fallbackDocs = (approvers || []).filter((a) => String(a.level || '').toUpperCase() === 'L2');
+    const pickedFallback = tryPick(fallbackDocs);
+    if (!pickedFallback) throw new Error('No eligible Level 2 approver found. Admin setup required.');
+    return pickedFallback;
+  };
 
   const performApprove = async () => {
     if (!approveTarget?.$id || !approveStage) return;
