@@ -19,6 +19,7 @@ import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
 import { useHrAuth } from '@/context/HrAuthContext';
 import { HR_BUCKETS, HR_COLLECTIONS, HR_DB_ID, hrDatabases, hrStorage, Query } from '@/lib/appwrite';
+import { canApproveRequestWeb } from '@/lib/general-request-approvals';
 
 export default function HrRequestDetailScreen() {
   const { user, isLoading } = useHrAuth();
@@ -206,61 +207,41 @@ export default function HrRequestDetailScreen() {
     return { status, stage, title, requestId, when, stageLabel };
   }, [doc]);
 
-  const canApprove = useMemo(() => {
-    if (!doc || !user) return false;
-    const stage = String(doc.approvalStage || '').toUpperCase();
-    const me = user.$id || (user as any).userId;
-    if (!me) return false;
-    // No self-approval.
-    if (String(doc.userId || '') === String(me)) return false;
-    if (stage === 'DEPARTMENT_REVIEW') return String(doc.departmentReviewerId || '') === String(me);
-    if (stage === 'L1_APPROVAL') return String(doc.l1ApproverId || '') === String(me);
-    if (stage === 'L2_APPROVAL') return String(doc.l2ApproverId || '') === String(me);
-    if (stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING') {
-      const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
-        (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
-        '') as string;
-      return (
-        (!!financeDeptId && String((user as any).departmentId || '') === financeDeptId) ||
-        String((user as any)?.departmentName || '').toLowerCase().includes('finance') ||
-        String((user as any)?.systemRole || '').toLowerCase().includes('finance')
-      );
-    }
-    return false;
-  }, [doc, user]);
-
   const approvalStage = useMemo<'department' | 'l1' | 'l2' | 'finance' | null>(() => {
-    const stage = String(doc?.approvalStage || '').toUpperCase();
+    const stage = String(doc?.approvalStage || doc?.currentStage || '').toUpperCase();
     if (stage === 'DEPARTMENT_REVIEW') return 'department';
     if (stage === 'L1_APPROVAL') return 'l1';
     if (stage === 'L2_APPROVAL') return 'l2';
     if (stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING') return 'finance';
+    if (String(doc?.status || '').toUpperCase() === 'L1_APPROVED' && doc?.l2ApproverId) return 'l2';
     return null;
-  }, [doc?.approvalStage]);
+  }, [doc?.approvalStage, doc?.currentStage, doc?.status, doc?.l2ApproverId]);
+
+  const canApprove = useMemo(
+    () => canApproveRequestWeb(doc, user),
+    [doc, user],
+  );
 
   const filteredApprovers = useMemo(() => {
     const stage = approvalStage;
-    const me = String(user?.$id || (user as any)?.userId || '');
     const owner = String(doc?.userId || '');
     if (!stage) return [];
     if (stage !== 'department' && stage !== 'l1') return [];
     const level = stage === 'department' ? 'L1' : 'L2';
     return approvers
       .filter((a) => String(a.level || '').toUpperCase() === level)
-      .filter((a) => String(a.userId || '') !== owner)
-      .filter((a) => String(a.userId || '') !== me);
-  }, [approvalStage, approvers, doc?.userId, user]);
+      .filter((a) => String(a.userId || '') !== owner);
+  }, [approvalStage, approvers, doc?.userId]);
 
   const resolveDefaultL2ApproverId = useCallback(async () => {
     const deptId = String(doc?.departmentId || '').trim();
     const requesterId = String(doc?.userId || '');
-    const meId = String(user?.$id || (user as any)?.userId || '');
 
     const tryPick = (docs: any[]) => {
       const picked = docs
         .map((d) => String(d?.userId || '').trim())
         .filter(Boolean)
-        .find((uid) => uid !== requesterId && uid !== meId);
+        .find((uid) => uid !== requesterId);
       return picked || '';
     };
 
@@ -281,7 +262,7 @@ export default function HrRequestDetailScreen() {
     const pickedFallback = tryPick(filteredApprovers);
     if (!pickedFallback) throw new Error('No eligible Level 2 approver found. Admin setup required.');
     return pickedFallback;
-  }, [doc?.departmentId, doc?.userId, filteredApprovers, user]);
+  }, [doc?.departmentId, doc?.userId, filteredApprovers]);
 
   const openApprove = () => {
     setApproveSelectedUserId('');
@@ -304,6 +285,10 @@ export default function HrRequestDetailScreen() {
 
   const performApprove = async () => {
     if (!doc?.$id || !approvalStage || !user) return;
+    if (!canApproveRequestWeb(doc, user)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at the current stage.');
+      return;
+    }
     try {
       setApproving(true);
       const now = new Date().toISOString();
@@ -324,6 +309,7 @@ export default function HrRequestDetailScreen() {
         });
       } else if (approvalStage === 'l1') {
         const l2UserId = approveSelectedUserId || (await resolveDefaultL2ApproverId());
+        if (!l2UserId) throw new Error('Select an L2 approver to continue.');
         if (!approveSelectedUserId) setApproveSelectedUserId(String(l2UserId));
         const l2 = approvers.find((a) => String(a.userId) === String(l2UserId));
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, doc.$id, {
@@ -384,6 +370,10 @@ export default function HrRequestDetailScreen() {
 
   const performReject = async () => {
     if (!doc?.$id || !user) return;
+    if (!canApproveRequestWeb(doc, user)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at the current stage.');
+      return;
+    }
     const reason = rejectReason.trim();
     if (!reason) {
       Alert.alert('Rejection reason required', 'Please provide a reason before rejecting.');
@@ -673,6 +663,35 @@ export default function HrRequestDetailScreen() {
                 <Text style={styles.modalLabel}>
                   Select L1 Approver *
                 </Text>
+                <View style={styles.selectList}>
+                  {filteredApprovers.slice(0, 40).map((a) => (
+                    <Pressable
+                      key={String(a.$id || a.userId)}
+                      onPress={() => setApproveSelectedUserId(String(a.userId))}
+                      style={[styles.selectItem, approveSelectedUserId === String(a.userId) && styles.selectItemActive]}
+                    >
+                      <Text
+                        style={[
+                          styles.selectItemText,
+                          approveSelectedUserId === String(a.userId) && styles.selectItemTextActive,
+                        ]}
+                      >
+                        {a.approverName || a.name || a.userId}
+                      </Text>
+                    </Pressable>
+                  ))}
+                  {filteredApprovers.length === 0 ? (
+                    <View style={{ padding: 12 }}>
+                      <Text style={styles.mutedText}>No eligible approvers found. Admin setup required.</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {approvalStage === 'l1' ? (
+              <View style={{ marginTop: 12 }}>
+                <Text style={styles.modalLabel}>Select L2 Approver *</Text>
                 <View style={styles.selectList}>
                   {filteredApprovers.slice(0, 40).map((a) => (
                     <Pressable

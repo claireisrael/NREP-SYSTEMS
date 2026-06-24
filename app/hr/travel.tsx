@@ -19,24 +19,33 @@ import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
 import { useHrAuth } from '@/context/HrAuthContext';
 import { HR_COLLECTIONS, HR_DB_ID, hrDatabases, Query } from '@/lib/appwrite';
+import {
+  canSubmitTravelApproval,
+  loadMyTravelRequests,
+  loadPendingTravelFinance,
+  loadPendingTravelL1,
+  loadPendingTravelL2,
+  loadTravelApproverRoles,
+  type TravelApproverRoles,
+} from '@/lib/hr/travel-approvals';
+import { getPrimaryWorkflowUserId } from '@/lib/general-request-approvals';
 
 export default function HrTravelScreen() {
   const { user, isLoading } = useHrAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
-    (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
-    '') as string;
-  const isFinanceUser =
-    (!!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId) ||
-    String((user as any)?.departmentName || '').toLowerCase().includes('finance') ||
-    String((user as any)?.systemRole || '').toLowerCase().includes('finance');
   const systemRoleLower = String((user as any)?.systemRole || '').trim().toLowerCase();
   const isSeniorManager = systemRoleLower === 'senior manager' || systemRoleLower === 'senior admin';
-  const isSupervisor = systemRoleLower === 'supervisor';
-  const canApprove = isSeniorManager || isSupervisor || isFinanceUser;
   const hasAdminAccess = isSeniorManager;
+  const [approverRoles, setApproverRoles] = useState<TravelApproverRoles>({
+    isL1: false,
+    isL2: false,
+    isFinanceDept: false,
+    canShowApprovalsTab: false,
+    canShowFinanceQueue: false,
+  });
+  const canShowApprovalsTab = approverRoles.canShowApprovalsTab || approverRoles.canShowFinanceQueue;
   const [activeTab, setActiveTab] = useState<'my' | 'approvals'>('my');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>(
     'all',
@@ -76,66 +85,33 @@ export default function HrTravelScreen() {
       setError(null);
       setLoading(true);
 
+      const roles = await loadTravelApproverRoles(user);
+      setApproverRoles(roles);
+
       const [mine, l1, l2, fin] = await Promise.all([
-        withTimeout(
-          hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-            Query.equal('userId', user.$id),
-            Query.orderDesc('submissionDate'),
-            Query.limit(50),
-          ]),
-          12000,
-          'Loading your travel requests timed out.',
-        ),
-        canApprove
-          ? withTimeout(
-              hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-                Query.equal('l1ApproverId', user.$id),
-                Query.equal('status', 'pending'),
-                Query.orderDesc('submissionDate'),
-                Query.limit(50),
-              ]),
-              12000,
-              'Loading L1 approvals timed out.',
-            )
-          : Promise.resolve({ documents: [] } as any),
-        canApprove
-          ? withTimeout(
-              hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-                Query.equal('l2ApproverId', user.$id),
-                Query.equal('status', 'l1_approved'),
-                Query.orderDesc('submissionDate'),
-                Query.limit(50),
-              ]),
-              12000,
-              'Loading L2 approvals timed out.',
-            )
-          : Promise.resolve({ documents: [] } as any),
-        isFinanceUser
-          ? withTimeout(
-              hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, [
-                // Web parity: finance queue items are those that finished SM/L2 and are awaiting finance completion.
-                // Status is an enum; finance queue is driven by L2 approval.
-                Query.or([Query.equal('status', 'l2_approved'), Query.equal('status', 'L2_APPROVED')]),
-                Query.orderDesc('l2ApprovalDate'),
-                Query.limit(100),
-              ]),
-              12000,
-              'Loading Finance approvals timed out.',
-            )
-          : Promise.resolve({ documents: [] } as any),
+        withTimeout(loadMyTravelRequests(user, 50), 12000, 'Loading your travel requests timed out.'),
+        roles.isL1
+          ? withTimeout(loadPendingTravelL1(user), 12000, 'Loading L1 approvals timed out.')
+          : Promise.resolve([]),
+        roles.isL2
+          ? withTimeout(loadPendingTravelL2(user), 12000, 'Loading L2 approvals timed out.')
+          : Promise.resolve([]),
+        roles.isFinanceDept
+          ? withTimeout(loadPendingTravelFinance(), 12000, 'Loading Finance approvals timed out.')
+          : Promise.resolve([]),
       ]);
 
-      setMyRequests((mine as any).documents ?? []);
-      setPendingL1((l1 as any).documents ?? []);
-      setPendingL2((l2 as any).documents ?? []);
-      setPendingFinance((fin as any).documents ?? []);
+      setMyRequests(mine);
+      setPendingL1(l1);
+      setPendingL2(l2);
+      setPendingFinance(fin);
     } catch (e: any) {
       console.error('Failed to load travel requests', e);
       setError(e?.message || 'Failed to load travel requests');
     } finally {
       setLoading(false);
     }
-  }, [user?.$id, canApprove, isFinanceUser]);
+  }, [user]);
 
   useEffect(() => {
     if (!isLoading && user?.$id) {
@@ -218,20 +194,6 @@ export default function HrTravelScreen() {
     }
   };
 
-  const canActOnApproval = useCallback(
-    (t: any, stage: 'l1' | 'l2' | 'finance') => {
-      if (!t || !user?.$id) return false;
-      const requesterId = String(t.userId || '');
-      // Web parity: no self-approval.
-      if (requesterId && requesterId === String(user.$id)) return false;
-      const status = String(t.status || '').toLowerCase();
-      if (stage === 'l1') return String(t.l1ApproverId || '') === String(user.$id) && status === 'pending';
-      if (stage === 'l2') return String(t.l2ApproverId || '') === String(user.$id) && status === 'l1_approved';
-      return isFinanceUser && status === 'l2_approved';
-    },
-    [user?.$id, isFinanceUser],
-  );
-
   const resolveActiveL2ApproverId = useCallback(async () => {
     // Mirror common web config: route L1-approved items to an active L2 approver.
     const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS, [
@@ -246,10 +208,6 @@ export default function HrTravelScreen() {
   }, []);
 
   const openApprove = (t: any, stage: 'l1' | 'l2' | 'finance') => {
-    if (!canActOnApproval(t, stage)) {
-      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
-      return;
-    }
     setApproveTarget(t);
     setApproveStage(stage);
     setApproveComments('');
@@ -266,8 +224,11 @@ export default function HrTravelScreen() {
 
   const confirmApprove = async () => {
     if (!approveTarget?.$id || !approveStage || !user?.$id) return;
-    if (!canActOnApproval(approveTarget, approveStage)) {
-      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
+    if (!canSubmitTravelApproval(user, approveTarget, approveStage)) {
+      Alert.alert(
+        'Cannot approve',
+        'This request is no longer at the expected approval stage. Pull to refresh and try again.',
+      );
       return;
     }
     setApproving(true);
@@ -303,10 +264,6 @@ export default function HrTravelScreen() {
   };
 
   const openReject = (t: any, stage: 'l1' | 'l2' | 'finance') => {
-    if (!canActOnApproval(t, stage)) {
-      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
-      return;
-    }
     setRejectTarget(t);
     setRejectStage(stage);
     setRejectReason('');
@@ -323,8 +280,11 @@ export default function HrTravelScreen() {
 
   const confirmReject = async () => {
     if (!rejectTarget?.$id || !rejectStage || !user?.$id) return;
-    if (!canActOnApproval(rejectTarget, rejectStage)) {
-      Alert.alert('Not allowed', 'You are not the designated approver for this request at this stage.');
+    if (!canSubmitTravelApproval(user, rejectTarget, rejectStage)) {
+      Alert.alert(
+        'Cannot reject',
+        'This request is no longer at the expected approval stage. Pull to refresh and try again.',
+      );
       return;
     }
     const reason = rejectReason.trim();
@@ -338,7 +298,7 @@ export default function HrTravelScreen() {
       const update: any = {
         status: 'rejected',
         rejectionReason: reason,
-        rejectedBy: String(user.$id),
+        rejectedBy: getPrimaryWorkflowUserId(user),
         rejectionDate: now,
       };
       await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, String(rejectTarget.$id), update);
@@ -483,7 +443,7 @@ export default function HrTravelScreen() {
           </>
         )}
 
-        {canApprove && (
+        {canShowApprovalsTab ? (
           <View style={styles.segmentRow}>
             <Pressable
               onPress={() => setActiveTab('my')}
@@ -507,7 +467,7 @@ export default function HrTravelScreen() {
               </Text>
             </Pressable>
           </View>
-        )}
+        ) : null}
 
         {loading ? (
           <View style={styles.loadingBox}>
@@ -594,7 +554,9 @@ export default function HrTravelScreen() {
           <View style={{ gap: 12 }}>
             <View style={styles.listCard}>
               <Text style={styles.sectionLabel}>Pending L1</Text>
-              {pendingL1.length === 0 ? (
+              {!approverRoles.isL1 ? (
+                <Text style={styles.emptyText}>You are not configured as an L1 travel approver.</Text>
+              ) : pendingL1.length === 0 ? (
                 <Text style={styles.emptyText}>No L1 approvals.</Text>
               ) : (
                 pendingL1.map((t) => (
@@ -623,16 +585,14 @@ export default function HrTravelScreen() {
                         >
                           <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
                         </Pressable>
-                        {canActOnApproval(t, 'l1') ? (
-                          <>
-                            <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'l1')}>
-                              <MaterialCommunityIcons name="check" size={18} color="#047857" />
-                            </Pressable>
-                            <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'l1')}>
-                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
-                            </Pressable>
-                          </>
-                        ) : null}
+                        <>
+                          <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'l1')}>
+                            <MaterialCommunityIcons name="check" size={18} color="#047857" />
+                          </Pressable>
+                          <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'l1')}>
+                            <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                          </Pressable>
+                        </>
                       </View>
                     </View>
                   </View>
@@ -642,7 +602,9 @@ export default function HrTravelScreen() {
 
             <View style={styles.listCard}>
               <Text style={styles.sectionLabel}>Pending L2</Text>
-              {pendingL2.length === 0 ? (
+              {!approverRoles.isL2 ? (
+                <Text style={styles.emptyText}>You are not configured as an L2 travel approver.</Text>
+              ) : pendingL2.length === 0 ? (
                 <Text style={styles.emptyText}>No L2 approvals.</Text>
               ) : (
                 pendingL2.map((t) => (
@@ -671,16 +633,14 @@ export default function HrTravelScreen() {
                         >
                           <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
                         </Pressable>
-                        {canActOnApproval(t, 'l2') ? (
-                          <>
-                            <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'l2')}>
-                              <MaterialCommunityIcons name="check" size={18} color="#047857" />
-                            </Pressable>
-                            <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'l2')}>
-                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
-                            </Pressable>
-                          </>
-                        ) : null}
+                        <>
+                          <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'l2')}>
+                            <MaterialCommunityIcons name="check" size={18} color="#047857" />
+                          </Pressable>
+                          <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'l2')}>
+                            <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                          </Pressable>
+                        </>
                       </View>
                     </View>
                   </View>
@@ -688,7 +648,7 @@ export default function HrTravelScreen() {
               )}
             </View>
 
-            {isFinanceUser ? (
+            {approverRoles.isFinanceDept ? (
               <View style={styles.listCard}>
                 <Text style={styles.sectionLabel}>Pending Finance</Text>
                 {pendingFinance.length === 0 ? (
@@ -720,16 +680,14 @@ export default function HrTravelScreen() {
                           >
                             <MaterialCommunityIcons name="eye-outline" size={16} color="#054653" />
                           </Pressable>
-                          {canActOnApproval(t, 'finance') ? (
-                            <>
-                              <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'finance')}>
-                                <MaterialCommunityIcons name="check-all" size={18} color="#047857" />
-                              </Pressable>
-                              <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'finance')}>
-                                <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
-                              </Pressable>
-                            </>
-                          ) : null}
+                          <>
+                            <Pressable style={styles.actionIcon} onPress={() => openApprove(t, 'finance')}>
+                              <MaterialCommunityIcons name="check-all" size={18} color="#047857" />
+                            </Pressable>
+                            <Pressable style={styles.actionIcon} onPress={() => openReject(t, 'finance')}>
+                              <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
+                            </Pressable>
+                          </>
                         </View>
                       </View>
                     </View>

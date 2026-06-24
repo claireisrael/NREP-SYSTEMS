@@ -8,6 +8,8 @@ import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
 import { useHrAuth } from '@/context/HrAuthContext';
 import { HR_COLLECTIONS, HR_DB_ID, hrDatabases, Query } from '@/lib/appwrite';
+import { userMatchesRecord, getPrimaryWorkflowUserId } from '@/lib/general-request-approvals';
+import { canSubmitTravelApproval, canUserApproveTravelRequest } from '@/lib/hr/travel-approvals';
 
 export default function HrTravelRequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -26,8 +28,8 @@ export default function HrTravelRequestDetailScreen() {
 
   const canEdit = useMemo(() => {
     const status = String(doc?.status || '').toLowerCase();
-    return doc && doc.userId === user?.$id && (status === 'pending' || status === 'rejected');
-  }, [doc, user?.$id]);
+    return doc && userMatchesRecord(user, doc.userId) && (status === 'pending' || status === 'rejected');
+  }, [doc, user]);
 
   const parsed = useMemo(() => {
     if (!doc) return null;
@@ -39,23 +41,14 @@ export default function HrTravelRequestDetailScreen() {
     };
   }, [doc]);
 
-  const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
-    (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
-    '') as string;
-  const isFinanceUser = !!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId;
-
   const canAct = useMemo(() => {
-    if (!parsed || !user?.$id) return { l1: false, l2: false, finance: false };
-    const myId = String(user.$id);
-    const requesterId = String(parsed.userId || '');
-    if (requesterId && requesterId === myId) return { l1: false, l2: false };
-    const status = String(parsed.status || '').toLowerCase();
+    if (!parsed || !user) return { l1: false, l2: false, finance: false };
     return {
-      l1: String(parsed.l1ApproverId || '') === myId && status === 'pending',
-      l2: String(parsed.l2ApproverId || '') === myId && status === 'l1_approved',
-      finance: isFinanceUser && status === 'l2_approved',
+      l1: canUserApproveTravelRequest(user, parsed, 'L1'),
+      l2: canUserApproveTravelRequest(user, parsed, 'L2'),
+      finance: canUserApproveTravelRequest(user, parsed, 'finance'),
     };
-  }, [parsed, user?.$id, isFinanceUser]);
+  }, [parsed, user]);
 
   const resolveActiveL2ApproverId = useCallback(async () => {
     const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUEST_APPROVERS, [
@@ -96,7 +89,14 @@ export default function HrTravelRequestDetailScreen() {
   }, [acting]);
 
   const confirmApprove = useCallback(async () => {
-    if (!parsed?.$id || !actionStage) return;
+    if (!parsed?.$id || !actionStage || !user) return;
+    if (!canSubmitTravelApproval(user, parsed, actionStage)) {
+      Alert.alert(
+        'Cannot approve',
+        'This request is no longer at the expected approval stage. Refresh and try again.',
+      );
+      return;
+    }
     setActing(true);
     try {
       const now = new Date().toISOString();
@@ -124,10 +124,17 @@ export default function HrTravelRequestDetailScreen() {
     } finally {
       setActing(false);
     }
-  }, [actionComments, actionStage, closeActionModals, load, parsed?.$id, resolveActiveL2ApproverId]);
+  }, [actionComments, actionStage, closeActionModals, load, parsed, resolveActiveL2ApproverId, user]);
 
   const confirmReject = useCallback(async () => {
-    if (!parsed?.$id || !actionStage || !user?.$id) return;
+    if (!parsed?.$id || !actionStage || !user) return;
+    if (!canSubmitTravelApproval(user, parsed, actionStage)) {
+      Alert.alert(
+        'Cannot reject',
+        'This request is no longer at the expected approval stage. Refresh and try again.',
+      );
+      return;
+    }
     const reason = actionComments.trim();
     if (!reason) {
       Alert.alert('Validation', 'Please enter a rejection reason.');
@@ -139,7 +146,7 @@ export default function HrTravelRequestDetailScreen() {
       const update: any = {
         status: 'rejected',
         rejectionReason: reason,
-        rejectedBy: String(user.$id),
+        rejectedBy: getPrimaryWorkflowUserId(user),
         rejectionDate: now,
       };
       await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.TRAVEL_REQUESTS, String(parsed.$id), update);
@@ -150,7 +157,7 @@ export default function HrTravelRequestDetailScreen() {
     } finally {
       setActing(false);
     }
-  }, [actionComments, actionStage, closeActionModals, load, parsed?.$id, user?.$id]);
+  }, [actionComments, actionStage, closeActionModals, load, parsed, user]);
 
   const load = useCallback(async () => {
     if (!id) return;

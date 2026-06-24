@@ -18,6 +18,15 @@ import { ThemedView } from '@/components/themed-view';
 import { HrBottomNav } from '@/components/HrBottomNav';
 import { useHrAuth } from '@/context/HrAuthContext';
 import { HR_COLLECTIONS, HR_DB_ID, hrDatabases, Query } from '@/lib/appwrite';
+import {
+  canApproveRequestWeb,
+  getUserApprovalRoles,
+  isFinanceUser as isFinanceTeamUser,
+  loadGlobalApprovers,
+  loadPendingGeneralRequestApprovals,
+  queryForUserIdField,
+  shouldShowQueuedApprovalActions,
+} from '@/lib/general-request-approvals';
 
 export default function HrRequestsScreen() {
   const { user, isLoading } = useHrAuth();
@@ -29,6 +38,7 @@ export default function HrRequestsScreen() {
   const [approvalItems, setApprovalItems] = useState<any[]>([]);
   const [completedItems, setCompletedItems] = useState<any[]>([]);
   const [approvers, setApprovers] = useState<any[]>([]);
+  const [canShowApprovalsTab, setCanShowApprovalsTab] = useState(false);
   const [activeTab, setActiveTab] = useState<'my' | 'approvals' | 'completed'>('my');
   const [page, setPage] = useState(0); // 0-based (server paging for "My Requests")
   const [total, setTotal] = useState<number | null>(null);
@@ -68,63 +78,25 @@ export default function HrRequestsScreen() {
     try {
       setLoading(true);
       setError(null);
-      const financeDeptId = ((process.env as any)?.EXPO_PUBLIC_FINANCE_DEPARTMENT_ID ||
-        (process.env as any)?.NEXT_PUBLIC_FINANCE_DEPARTMENT_ID ||
-        '') as string;
-      const isFinanceUser =
-        (!!financeDeptId && String((user as any)?.departmentId || '') === financeDeptId) ||
-        String(user.departmentName || '').toLowerCase().includes('finance') ||
-        String(user.systemRole || '').toLowerCase().includes('finance');
+      const isFinanceUser = isFinanceTeamUser(user);
       const isSeniorManager = String(user.systemRole || '').toLowerCase() === 'senior manager';
       const canSeeCompleted = isFinanceUser || isSeniorManager;
 
-      const baseUserId = user.$id;
+      const approverDocs = await loadGlobalApprovers();
+      const roles = getUserApprovalRoles(user, approverDocs, user.isHeadofDepartment === true);
+      setApprovers(approverDocs);
+      setCanShowApprovalsTab(roles.canShowApprovalsTab || roles.isFinanceQueue);
 
-      const [mine, dept, l1, l2, finance, approverDocs, completed] = await Promise.all([
+      const [mine, approvals, completed] = await Promise.all([
         hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-          Query.equal('userId', baseUserId),
+          queryForUserIdField('userId', user),
           Query.orderDesc('submissionDate'),
           Query.limit(PAGE_SIZE),
           Query.offset(0),
         ]),
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-          Query.equal('departmentReviewerId', baseUserId),
-          Query.equal('approvalStage', 'DEPARTMENT_REVIEW'),
-          Query.orderDesc('submissionDate'),
-          Query.limit(50),
-        ]),
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-          Query.equal('l1ApproverId', baseUserId),
-          Query.equal('approvalStage', 'L1_APPROVAL'),
-          Query.orderDesc('submissionDate'),
-          Query.limit(50),
-        ]),
-        hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-          Query.equal('l2ApproverId', baseUserId),
-          Query.equal('approvalStage', 'L2_APPROVAL'),
-          Query.orderDesc('submissionDate'),
-          Query.limit(50),
-        ]),
-        isFinanceUser
-          ? hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-              // Web parity / backward compatibility:
-              // Some records may not have approvalStage set, but may indicate finance via currentStage/financeRequired.
-              Query.or([
-                Query.equal('approvalStage', 'FINANCE_COMPLETION'),
-                Query.equal('currentStage', 'PROCESSING'),
-                Query.equal('financeRequired', true),
-              ]),
-              Query.orderDesc('submissionDate'),
-              Query.limit(200),
-            ])
-          : Promise.resolve({ documents: [] } as any),
-        HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS
-          ? hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUEST_APPROVERS as any, [
-              Query.equal('isActive', true),
-              Query.orderAsc('approverName'),
-              Query.limit(200),
-            ])
-          : Promise.resolve({ documents: [] } as any),
+        roles.canLoadApprovals
+          ? loadPendingGeneralRequestApprovals(user, roles)
+          : Promise.resolve([]),
         canSeeCompleted
           ? hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
               Query.equal('status', 'APPROVED'),
@@ -137,28 +109,7 @@ export default function HrRequestsScreen() {
 
       setItems((mine as any)?.documents ?? []);
       setTotal((mine as any)?.total ?? (mine as any)?.documents?.length ?? 0);
-
-      const financeDocsRaw = (((finance as any)?.documents ?? []) as any[]).filter((d) => {
-        const status = String(d?.status || '').toUpperCase();
-        const stage = String(d?.approvalStage || d?.currentStage || '').toUpperCase();
-        const financeRequired = d?.financeRequired === true;
-        const isFinanceStage = stage === 'FINANCE_COMPLETION' || stage === 'PROCESSING' || financeRequired;
-        const isDone = status === 'APPROVED' || status === 'COMPLETED' || stage === 'COMPLETED' || stage === 'COMPLETION';
-        return isFinanceStage && !isDone;
-      });
-
-      const approvals = [
-        ...(((dept as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'department' })),
-        ...(((l1 as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'l1' })),
-        ...(((l2 as any)?.documents ?? []) as any[]).map((d) => ({ ...d, __queue: 'l2' })),
-        ...financeDocsRaw.map((d) => ({ ...d, __queue: 'finance' })),
-      ].sort((a: any, b: any) => {
-        const ad = new Date(a.submissionDate || a.$createdAt || 0).getTime();
-        const bd = new Date(b.submissionDate || b.$createdAt || 0).getTime();
-        return bd - ad;
-      });
       setApprovalItems(approvals);
-      setApprovers(((approverDocs as any)?.documents ?? []) as any[]);
       setCompletedItems(((completed as any)?.documents ?? []) as any[]);
 
       setPage(0);
@@ -182,7 +133,7 @@ export default function HrRequestsScreen() {
         setError(null);
 
         const res = await hrDatabases.listDocuments(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, [
-          Query.equal('userId', user.$id),
+          queryForUserIdField('userId', user),
           Query.orderDesc('submissionDate'),
           Query.limit(PAGE_SIZE),
           Query.offset(nextPage * PAGE_SIZE),
@@ -203,7 +154,7 @@ export default function HrRequestsScreen() {
         }
       }
     },
-    [user?.$id],
+    [user],
   );
 
   useEffect(() => {
@@ -291,11 +242,6 @@ export default function HrRequestsScreen() {
   const canSeeCompleted = isFinanceUser || isSeniorManager;
 
   const openApprove = (doc: any) => {
-    // Hard rule (matches web): no self-approval.
-    if (String(doc?.userId || '') === String(user?.$id || '')) {
-      Alert.alert('Not allowed', 'You cannot approve your own request.');
-      return;
-    }
     const queue = (doc?.__queue || '') as any;
     setApproveTarget(doc);
     setApproveStage(queue === 'department' ? 'department' : queue === 'l1' ? 'l1' : queue === 'l2' ? 'l2' : 'finance');
@@ -316,11 +262,6 @@ export default function HrRequestsScreen() {
   };
 
   const openReject = (doc: any) => {
-    // Hard rule (matches web): no self-rejection as approver on own request.
-    if (String(doc?.userId || '') === String(user?.$id || '')) {
-      Alert.alert('Not allowed', 'You cannot reject your own request.');
-      return;
-    }
     setRejectTarget(doc);
     setRejectReason('');
     setRejectModalOpen(true);
@@ -336,13 +277,12 @@ export default function HrRequestsScreen() {
   const resolveDefaultL2ApproverId = async (requestDoc: any) => {
     const deptId = String(requestDoc?.departmentId || '').trim();
     const requesterId = String(requestDoc?.userId || '');
-    const meId = String(user?.$id || '');
 
     const tryPick = (docs: any[]) => {
       const picked = docs
         .map((d) => String(d?.userId || '').trim())
         .filter(Boolean)
-        .find((uid) => uid !== requesterId && uid !== meId);
+        .find((uid) => uid !== requesterId);
       return picked || '';
     };
 
@@ -368,14 +308,15 @@ export default function HrRequestsScreen() {
 
   const performApprove = async () => {
     if (!approveTarget?.$id || !approveStage) return;
+    if (!canApproveRequestWeb(approveTarget, user)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at the current stage.');
+      return;
+    }
     try {
       setApproving(true);
       const now = new Date().toISOString();
       const meId = user.$id;
       const meName = user.name || user.email || 'Approver';
-      if (String(approveTarget?.userId || '') === String(meId)) {
-        throw new Error('You cannot approve your own request.');
-      }
 
       if (approveStage === 'department') {
         if (!approveSelectedUserId) throw new Error('Select an L1 approver to continue.');
@@ -398,6 +339,7 @@ export default function HrRequestsScreen() {
         });
       } else if (approveStage === 'l1') {
         const l2UserId = approveSelectedUserId || (await resolveDefaultL2ApproverId(approveTarget));
+        if (!l2UserId) throw new Error('Select an L2 approver to continue.');
         if (!approveSelectedUserId) setApproveSelectedUserId(String(l2UserId));
         const l2 = approvers.find((a) => String(a.userId) === String(l2UserId));
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
@@ -450,7 +392,6 @@ export default function HrRequestsScreen() {
         await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, approveTarget.$id, {
           status: 'APPROVED',
           approvalStage: 'COMPLETED',
-          currentStage: 'COMPLETION',
           financeRequired: false,
           financeCompletionNotes: approveComments || '',
           completedBy: meId,
@@ -472,6 +413,10 @@ export default function HrRequestsScreen() {
 
   const performReject = async () => {
     if (!rejectTarget?.$id) return;
+    if (!canApproveRequestWeb(rejectTarget, user)) {
+      Alert.alert('Not allowed', 'You are not the designated approver for this request at the current stage.');
+      return;
+    }
     const reason = rejectReason.trim();
     if (!reason) {
       Alert.alert('Rejection reason required', 'Please provide a reason before rejecting.');
@@ -480,10 +425,9 @@ export default function HrRequestsScreen() {
     try {
       setRejecting(true);
       const now = new Date().toISOString();
-      if (String(rejectTarget?.userId || '') === String(user.$id)) {
-        throw new Error('You cannot reject your own request.');
-      }
-      const stage = String(rejectTarget.approvalStage || '').toUpperCase();
+
+      const stageRaw = String(rejectTarget.approvalStage || rejectTarget.currentStage || '').toUpperCase();
+      const stage = stageRaw === 'PROCESSING' ? 'FINANCE_COMPLETION' : stageRaw;
 
       const updateData: any = {
         status: 'REJECTED',
@@ -521,7 +465,7 @@ export default function HrRequestsScreen() {
         updateData.departmentReviewDate = null;
         updateData.departmentReviewComments = null;
       } else {
-        updateData.approvalStage = null;
+        updateData.approvalStage = rejectTarget.approvalStage || null;
       }
 
       await hrDatabases.updateDocument(HR_DB_ID, HR_COLLECTIONS.GENERAL_REQUESTS, rejectTarget.$id, updateData);
@@ -577,6 +521,7 @@ export default function HrRequestsScreen() {
           >
             <Text style={[styles.segmentText, activeTab === 'my' && styles.segmentTextActive]}>My Requests</Text>
           </Pressable>
+          {canShowApprovalsTab ? (
           <Pressable
             onPress={() => setActiveTab('approvals')}
             style={[styles.segment, activeTab === 'approvals' && styles.segmentActive]}
@@ -592,6 +537,7 @@ export default function HrRequestsScreen() {
               ) : null}
             </View>
           </Pressable>
+          ) : null}
           {canSeeCompleted ? (
             <Pressable
               onPress={() => setActiveTab('completed')}
@@ -784,11 +730,7 @@ export default function HrRequestsScreen() {
                             <MaterialCommunityIcons name="pencil-outline" size={16} color="#054653" />
                           </Pressable>
                         ) : null}
-                        {String(r.userId || '') === String(user.$id) ? (
-                          <View style={styles.selfApprovalPill}>
-                            <Text style={styles.selfApprovalText}>Your request</Text>
-                          </View>
-                        ) : (
+                        {shouldShowQueuedApprovalActions(r) ? (
                           <>
                             <Pressable style={styles.actionIcon} onPress={() => openApprove(r)}>
                               <MaterialCommunityIcons name="check" size={18} color="#047857" />
@@ -797,7 +739,11 @@ export default function HrRequestsScreen() {
                               <MaterialCommunityIcons name="close" size={18} color="#b91c1c" />
                             </Pressable>
                           </>
-                        )}
+                        ) : String(r.userId || '') === String(user.$id) ? (
+                          <View style={styles.selfApprovalPill}>
+                            <Text style={styles.selfApprovalText}>Your request</Text>
+                          </View>
+                        ) : null}
                       </View>
                     </View>
                       ))}
@@ -944,10 +890,34 @@ export default function HrRequestsScreen() {
                   Select L1 Approver
                 </Text>
                 <View style={styles.selectList}>
-                  {(approveStage === 'department'
-                    ? approvers.filter((a) => String(a.level || '').toUpperCase() === 'L1')
-                    : approvers.filter((a) => String(a.level || '').toUpperCase() === 'L2')
-                  )
+                  {approvers
+                    .filter((a) => String(a.level || '').toUpperCase() === 'L1')
+                    .filter((a) => String(a.userId) !== String(approveTarget?.userId))
+                    .slice(0, 30)
+                    .map((a) => (
+                      <Pressable
+                        key={String(a.$id || a.userId)}
+                        onPress={() => setApproveSelectedUserId(String(a.userId))}
+                        style={[
+                          styles.selectItem,
+                          approveSelectedUserId === String(a.userId) && styles.selectItemActive,
+                        ]}
+                      >
+                        <Text style={[styles.selectItemText, approveSelectedUserId === String(a.userId) && styles.selectItemTextActive]}>
+                          {a.approverName || a.name || a.userId}
+                        </Text>
+                      </Pressable>
+                    ))}
+                </View>
+              </View>
+            ) : null}
+
+            {approveStage === 'l1' ? (
+              <View style={{ marginTop: 12 }}>
+                <Text style={styles.modalLabel}>Select L2 Approver</Text>
+                <View style={styles.selectList}>
+                  {approvers
+                    .filter((a) => String(a.level || '').toUpperCase() === 'L2')
                     .filter((a) => String(a.userId) !== String(approveTarget?.userId))
                     .slice(0, 30)
                     .map((a) => (

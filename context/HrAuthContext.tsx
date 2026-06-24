@@ -13,12 +13,15 @@ import { HR_COLLECTIONS, HR_DB_ID, hrAccount, hrDatabases, Query } from '@/lib/a
 
 type HrUserProfile = {
   $id: string;
+  userId?: string;
+  staffDocId?: string;
   email: string;
   name?: string | null;
   staffCategory?: string | null;
   systemRole?: string | null;
   departmentId?: string | null;
   departmentName?: string | null;
+  isHeadofDepartment?: boolean;
   profilePicture?: string | null;
 } | null;
 
@@ -38,7 +41,7 @@ const HrAuthContext = createContext<HrAuthContextValue | undefined>(undefined);
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 10;
-const PROFILE_CACHE_VERSION = 1;
+const PROFILE_CACHE_VERSION = 3;
 const PROFILE_LOAD_TIMEOUT_MS = 8000;
 // If "Remember me" is OFF, expire mobile session after this window to match web-like behavior.
 // (Web sessions typically expire on browser close or shorter TTL; mobile otherwise can feel "forever".)
@@ -179,14 +182,29 @@ export function HrAuthProvider({ children }: HrAuthProviderProps) {
         }
       }
 
+      let isHeadofDepartment = false;
+      try {
+        const managedDepts = await hrDatabases.listDocuments(
+          HR_DB_ID,
+          HR_COLLECTIONS.DEPARTMENTS,
+          [Query.equal('managerId', authUserId), Query.limit(1)],
+        );
+        isHeadofDepartment = managedDepts.documents.length > 0;
+      } catch {
+        isHeadofDepartment = false;
+      }
+
       return {
         $id: authUserId,
+        userId: userDoc.userId || authUserId,
+        staffDocId: userDoc.$id,
         email: userDoc.email || fallbackEmail || '',
         name: userDoc.name,
         staffCategory: userDoc.staffCategory,
         systemRole: userDoc.systemRole,
         departmentId: userDoc.departmentId ?? null,
         departmentName,
+        isHeadofDepartment,
         profilePicture: userDoc.profilePicture ?? null,
       };
     } catch {
